@@ -581,7 +581,7 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
     }
 };
 
-class GeoPilotSettingsPopup : public geode::Popup<> {
+class GeoPilotSettingsPopup : public geode::Popup {
 protected:
     ButtonSprite* m_autoSprite = nullptr;
     ButtonSprite* m_orbSprite = nullptr;
@@ -592,18 +592,19 @@ protected:
     ButtonSprite* m_rangeSprite = nullptr;
     CCLabelBMFont* m_statusLabel = nullptr;
 
-    bool setup() override {
+    bool init() {
+        if (!Popup::init(360.f, 260.f, "square01_001.png")) return false;
         setTitle("GeoPilot Control Center");
 
         auto menu = CCMenu::create();
         menu->setPosition(CCPointZero);
-        m_mainLayer->addChild(menu, 10);
+        this->addChild(menu, 10);
 
         auto addButton = [&](const char* text, CCPoint pos, SEL_MenuHandler selector) -> ButtonSprite* {
             auto sprite = ButtonSprite::create(text, "bigFont.fnt", "GJ_button_04.png", 0.70f);
             if (!sprite) return nullptr;
             sprite->setScale(0.50f);
-            auto item = CCMenuItemSpriteExtra::create(sprite, this, selector);
+            auto item = CCMenuItemSpriteExtra::create(sprite, nullptr, this, selector);
             item->setPosition(pos);
             menu->addChild(item);
             return sprite;
@@ -614,7 +615,7 @@ protected:
         if (logo) {
             logo->setScale(0.44f);
             logo->setPosition({34.f, 215.f});
-            m_mainLayer->addChild(logo, 8);
+            this->addChild(logo, 8);
         }
 
         auto subtitle = CCLabelBMFont::create("SCAN  /  PREDICT  /  ACT", "chatFont.fnt");
@@ -623,7 +624,7 @@ protected:
             subtitle->setAnchorPoint({0.f, 0.5f});
             subtitle->setPosition({59.f, 213.f});
             subtitle->setColor({100, 220, 255});
-            m_mainLayer->addChild(subtitle, 8);
+            this->addChild(subtitle, 8);
         }
 
         m_autoSprite = addButton("", {91.f, 170.f}, menu_selector(GeoPilotSettingsPopup::onToggleAuto));
@@ -639,7 +640,7 @@ protected:
             m_statusLabel->setScale(0.43f);
             m_statusLabel->setPosition({180.f, 28.f});
             m_statusLabel->setColor({150, 225, 255});
-            m_mainLayer->addChild(m_statusLabel, 8);
+            this->addChild(m_statusLabel, 8);
         }
 
         refreshLabels();
@@ -674,7 +675,7 @@ protected:
 public:
     static GeoPilotSettingsPopup* create() {
         auto ret = new GeoPilotSettingsPopup();
-        if (ret->initAnchored(360.f, 260.f, "square01_001.png", CCRectZero)) {
+        if (ret->init()) {
             ret->autorelease();
             return ret;
         }
@@ -741,7 +742,7 @@ class $modify(GeoPilotPauseLayer, PauseLayer) {
             auto fallback = ButtonSprite::create("GEOPILOT", "bigFont.fnt", "GJ_button_04.png", 0.7f);
             fallback->setScale(0.50f);
             auto item = CCMenuItemSpriteExtra::create(
-                fallback, this, menu_selector(GeoPilotPauseLayer::onOpenSettings));
+                fallback, nullptr, this, menu_selector(GeoPilotPauseLayer::onOpenSettings));
             auto menu = CCMenu::create();
             menu->setPosition({win.width - 48.f, win.height - 40.f});
             menu->addChild(item);
@@ -751,7 +752,7 @@ class $modify(GeoPilotPauseLayer, PauseLayer) {
 
         logo->setScale(0.48f);
         auto item = CCMenuItemSpriteExtra::create(
-            logo, this, menu_selector(GeoPilotPauseLayer::onOpenSettings));
+            logo, nullptr, this, menu_selector(GeoPilotPauseLayer::onOpenSettings));
         item->setID("geopilot-settings-button");
         auto menu = CCMenu::create();
         menu->setPosition({win.width - 36.f, win.height - 36.f});
