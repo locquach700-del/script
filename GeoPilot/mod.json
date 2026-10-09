@@ -8,7 +8,7 @@
   },
   "id": "noob.geopilot",
   "name": "GeoPilot Auto Play",
-  "version": "v0.2.1",
+  "version": "v0.2.2",
   "developer": "Noob",
   "description": "Auto-detecting Geometry Dash controller with scanner rays, frame ETA, HUD and pause-menu controls.",
   "repository": "https://github.com/locquach700-del/script/tree/geopilot-build/GeoPilot",
