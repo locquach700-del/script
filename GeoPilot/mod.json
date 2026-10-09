@@ -8,9 +8,9 @@
   },
   "id": "noob.geopilot",
   "name": "GeoPilot Auto Play",
-  "version": "v0.3.1",
+  "version": "v0.4.0",
   "developer": "Noob",
-  "description": "Auto mode detection, spike timing, orb assist, scan rays and compact pause-menu control center with bundled logo.",
+  "description": "Preflight route analysis, red hazard / cyan safe-surface classification, orb prediction, scan rays and pause control center.",
   "repository": "https://github.com/locquach700-del/script/tree/geopilot-build/GeoPilot",
   "settings": {
     "controller-title": {
@@ -21,7 +21,7 @@
     "auto-play": {
       "type": "bool",
       "name": "Enable Auto Play",
-      "description": "Automatically react to recognized lethal obstacles.",
+      "description": "Follow the preflight route plan; avoid red hazards, land on reachable safe surfaces and time jump-activated orbs.",
       "default": false
     },
     "control-mode": {
@@ -58,7 +58,7 @@
     "lead-frames": {
       "type": "int",
       "name": "Jump Lead (Frames)",
-      "description": "How many measured update frames before contact the bot should act.",
+      "description": "Reaction lead measured in update frames. Raise slightly for faster sections; lower to reduce early jumps.",
       "default": 4,
       "min": 2,
       "max": 10,
@@ -89,7 +89,7 @@
     "orb-assist": {
       "type": "bool",
       "name": "Orb Assist",
-      "description": "Predict approaching yellow, green, pink, blue, red, black and special jump orbs.",
+      "description": "Detect jump-activated orb types/IDs (yellow, blue, pink, green, red, black, spider, teleport and custom).",
       "default": true
     }
   },

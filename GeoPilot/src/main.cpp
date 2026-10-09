@@ -38,6 +38,15 @@ namespace {
         int scannedObjects = 0;
         int knownHazards = 0;
         int recognizedOrbs = 0;
+        int safeSurfaces = 0;
+        int mapHazards = 0;
+        int mapSafeSurfaces = 0;
+        int mapOrbs = 0;
+        int mapPortals = 0;
+        int mapPads = 0;
+        float mapProgress = 0.f;
+        bool mapReady = false;
+        std::string routeSignal = "MAP ANALYSIS";
         std::string mode = "Unknown";
         std::string action = "INITIALIZING";
         int targetId = -1;
@@ -109,12 +118,80 @@ namespace {
         }
     }
 
-    // Jump-activated Geometry Dash orbs. Dash orbs are excluded because they
-    // trigger on contact without a jump press.
-    bool isInteractiveOrb(int id) {
-        switch (id) {
+    // Classify by Geometry Dash's object type as well as well-known IDs.
+    // This catches hazard variants whose sprite IDs are not in the legacy list.
+    bool isHazardObject(GameObject* object) {
+        if (!object) return false;
+        return object->m_objectType == GameObjectType::Hazard ||
+               object->m_objectType == GameObjectType::AnimatedHazard ||
+               isKnownHazard(object->m_objectID);
+    }
+
+    // Cyan hitboxes normally correspond to solid platform geometry. These are
+    // not lethal hazards; the controller may jump onto their top surface.
+    bool isSafeSurface(GameObject* object) {
+        if (!object) return false;
+        return object->m_objectType == GameObjectType::Solid ||
+               object->m_objectType == GameObjectType::Slope ||
+               object->m_objectType == GameObjectType::Breakable;
+    }
+
+    bool isInteractiveOrb(GameObject* object) {
+        if (!object) return false;
+        switch (object->m_objectID) {
             case 36: case 84: case 141: case 1022:
             case 1330: case 1333: case 1594: case 3004: case 3027:
+                return true;
+            default: break;
+        }
+        switch (object->m_objectType) {
+            case GameObjectType::YellowJumpRing:
+            case GameObjectType::PinkJumpRing:
+            case GameObjectType::GravityRing:
+            case GameObjectType::GreenRing:
+            case GameObjectType::RedJumpRing:
+            case GameObjectType::CustomRing:
+            case GameObjectType::SpiderOrb:
+            case GameObjectType::TeleportOrb:
+                return true;
+            default: return false;
+        }
+    }
+
+    bool isPortalObject(GameObject* object) {
+        if (!object) return false;
+        switch (object->m_objectType) {
+            case GameObjectType::InverseGravityPortal:
+            case GameObjectType::NormalGravityPortal:
+            case GameObjectType::ShipPortal:
+            case GameObjectType::CubePortal:
+            case GameObjectType::InverseMirrorPortal:
+            case GameObjectType::NormalMirrorPortal:
+            case GameObjectType::BallPortal:
+            case GameObjectType::RegularSizePortal:
+            case GameObjectType::MiniSizePortal:
+            case GameObjectType::UfoPortal:
+            case GameObjectType::DualPortal:
+            case GameObjectType::SoloPortal:
+            case GameObjectType::WavePortal:
+            case GameObjectType::RobotPortal:
+            case GameObjectType::TeleportPortal:
+            case GameObjectType::SpiderPortal:
+            case GameObjectType::SwingPortal:
+            case GameObjectType::GravityTogglePortal:
+                return true;
+            default: return false;
+        }
+    }
+
+    bool isPadObject(GameObject* object) {
+        if (!object) return false;
+        switch (object->m_objectType) {
+            case GameObjectType::YellowJumpPad:
+            case GameObjectType::PinkJumpPad:
+            case GameObjectType::GravityPad:
+            case GameObjectType::RedJumpPad:
+            case GameObjectType::SpiderPad:
                 return true;
             default: return false;
         }
@@ -153,8 +230,54 @@ namespace {
         float dy = 0.f;
         float contactDistance = 0.f;
         bool hazard = false;
+        bool safeSurface = false;
         bool orb = false;
     };
+
+    enum class RouteKind { Hazard, SafeSurface, Orb, Portal, Pad };
+
+    struct RouteEvent {
+        GameObject* object = nullptr;
+        RouteKind kind = RouteKind::Hazard;
+        float x = 0.f;
+        int objectId = -1;
+    };
+
+    std::string orbName(GameObject* object) {
+        if (!object) return "ORB";
+        const int id = object->m_objectID;
+        if (id == 36) return "YELLOW";
+        if (id == 84) return "BLUE";
+        if (id == 141) return "PINK";
+        if (id == 1022) return "GREEN";
+        if (id == 1330) return "BLACK";
+        if (id == 1333) return "RED";
+        if (id == 1594) return "TOGGLE";
+        if (id == 3004) return "SPIDER";
+        if (id == 3027) return "TELEPORT";
+        switch (object->m_objectType) {
+            case GameObjectType::YellowJumpRing: return "YELLOW";
+            case GameObjectType::PinkJumpRing: return "PINK";
+            case GameObjectType::GravityRing: return "BLUE";
+            case GameObjectType::GreenRing: return "GREEN";
+            case GameObjectType::RedJumpRing: return "RED";
+            case GameObjectType::SpiderOrb: return "SPIDER";
+            case GameObjectType::TeleportOrb: return "TELEPORT";
+            case GameObjectType::CustomRing: return "CUSTOM";
+            default: return "ORB";
+        }
+    }
+
+    std::string routeKindName(RouteKind kind, GameObject* object) {
+        switch (kind) {
+            case RouteKind::Hazard: return "DODGE RED";
+            case RouteKind::SafeSurface: return "LAND BLUE";
+            case RouteKind::Orb: return fmt::format("TAP {}", orbName(object));
+            case RouteKind::Portal: return "MODE PORTAL";
+            case RouteKind::Pad: return "AUTO PAD";
+        }
+        return "CHECK";
+    }
 
     CCPoint nodeCenterInParent(CCNode* node, CCNode* parent) {
         if (!node || !parent) return CCPointZero;
@@ -186,6 +309,16 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
         GameObject* lastTriggeredHazard = nullptr;
         GameObject* lastOrbApproach = nullptr;
         GameObject* lastOrbTriggered = nullptr;
+        GameObject* lastSafePlatform = nullptr;
+        std::vector<RouteEvent> routePlan;
+        float mapStartX = 0.f;
+        float mapEndX = 0.f;
+        int mapHazards = 0;
+        int mapSafeSurfaces = 0;
+        int mapOrbs = 0;
+        int mapPortals = 0;
+        int mapPads = 0;
+        bool mapAnalyzed = false;
         float lastTriggeredX = -100000.f;
         int lastTriggeredId = -1;
         float releaseCooldown = 0.f;
@@ -214,6 +347,71 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
         m_fields->elapsed = 0.f;
         m_fields->previousNearest = nullptr;
         m_fields->lastTriggeredHazard = nullptr;
+        m_fields->lastOrbApproach = nullptr;
+        m_fields->lastOrbTriggered = nullptr;
+        m_fields->lastSafePlatform = nullptr;
+
+        // Preflight the entire already-loaded level object list before Auto Play
+        // can make its first decision. This is a static route inventory, not a
+        // full physics simulation; live timing is still recalculated every frame.
+        m_fields->routePlan.clear();
+        m_fields->mapHazards = 0;
+        m_fields->mapSafeSurfaces = 0;
+        m_fields->mapOrbs = 0;
+        m_fields->mapPortals = 0;
+        m_fields->mapPads = 0;
+        const CCPoint initialPlayer = m_player1 ? nodeCenterInParent(m_player1, this) : CCPointZero;
+        m_fields->mapStartX = initialPlayer.x;
+        m_fields->mapEndX = initialPlayer.x;
+
+        auto initialObjects = geode::cocos::CCArrayExt<GameObject*>(m_objects);
+        for (auto* object : initialObjects) {
+            if (!object || object == m_player1 || object->m_objectID < 0) continue;
+            const auto p = nodeCenterInParent(object, this);
+            m_fields->mapEndX = std::max(m_fields->mapEndX, p.x);
+
+            RouteKind kind;
+            bool relevant = true;
+            if (isHazardObject(object)) {
+                kind = RouteKind::Hazard;
+                ++m_fields->mapHazards;
+            } else if (isInteractiveOrb(object)) {
+                kind = RouteKind::Orb;
+                ++m_fields->mapOrbs;
+            } else if (isPortalObject(object)) {
+                kind = RouteKind::Portal;
+                ++m_fields->mapPortals;
+            } else if (isPadObject(object)) {
+                kind = RouteKind::Pad;
+                ++m_fields->mapPads;
+            } else if (isSafeSurface(object)) {
+                kind = RouteKind::SafeSurface;
+                ++m_fields->mapSafeSurfaces;
+            } else {
+                relevant = false;
+            }
+
+            if (relevant) {
+                m_fields->routePlan.push_back({object, kind, p.x, object->m_objectID});
+            }
+        }
+
+        std::sort(m_fields->routePlan.begin(), m_fields->routePlan.end(),
+            [](RouteEvent const& a, RouteEvent const& b) { return a.x < b.x; });
+        m_fields->mapAnalyzed = true;
+        g_state.mapReady = true;
+        g_state.mapHazards = m_fields->mapHazards;
+        g_state.mapSafeSurfaces = m_fields->mapSafeSurfaces;
+        g_state.mapOrbs = m_fields->mapOrbs;
+        g_state.mapPortals = m_fields->mapPortals;
+        g_state.mapPads = m_fields->mapPads;
+        g_state.routeSignal = fmt::format(
+            "MAP READY H{} B{} O{} P{} PAD{}",
+            m_fields->mapHazards, m_fields->mapSafeSurfaces, m_fields->mapOrbs,
+            m_fields->mapPortals, m_fields->mapPads);
+        log::info("GeoPilot preflight: events={} hazards={} safe-surfaces={} orbs={} portals={} pads={}",
+            m_fields->routePlan.size(), m_fields->mapHazards, m_fields->mapSafeSurfaces,
+            m_fields->mapOrbs, m_fields->mapPortals, m_fields->mapPads);
         return true;
     }
 
@@ -240,6 +438,7 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
                 m_fields->lastTriggeredHazard = nullptr;
                 m_fields->lastOrbApproach = nullptr;
                 m_fields->lastOrbTriggered = nullptr;
+                m_fields->lastSafePlatform = nullptr;
                 m_fields->jumpHeld = false;
             }
             return;
@@ -265,6 +464,17 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
         g_state.scannedObjects = 0;
         g_state.knownHazards = 0;
         g_state.recognizedOrbs = 0;
+        g_state.safeSurfaces = 0;
+        g_state.mapReady = m_fields->mapAnalyzed;
+        g_state.mapHazards = m_fields->mapHazards;
+        g_state.mapSafeSurfaces = m_fields->mapSafeSurfaces;
+        g_state.mapOrbs = m_fields->mapOrbs;
+        g_state.mapPortals = m_fields->mapPortals;
+        g_state.mapPads = m_fields->mapPads;
+        g_state.mapProgress = (m_fields->mapEndX > m_fields->mapStartX)
+            ? std::clamp((playerCenter.x - m_fields->mapStartX) /
+                         (m_fields->mapEndX - m_fields->mapStartX), 0.f, 1.f) * 100.f
+            : 0.f;
         g_state.distance = -1.f;
         g_state.framesToImpact = -1.f;
         g_state.targetId = -1;
@@ -274,6 +484,7 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
 
         std::vector<ScanTarget> targets;
         std::vector<ScanTarget> hazards;
+        std::vector<ScanTarget> safeSurfaces;
         std::vector<ScanTarget> orbs;
         auto objects = geode::cocos::CCArrayExt<GameObject*>(m_objects);
 
@@ -287,9 +498,11 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
             if (dx < -35.f || dx > scanDistance || std::abs(dy) > 300.f) continue;
 
             ++g_state.scannedObjects;
-            const bool hazard = isKnownHazard(object->m_objectID);
-            const bool orb = isInteractiveOrb(object->m_objectID);
+            const bool hazard = isHazardObject(object);
+            const bool safeSurface = isSafeSurface(object);
+            const bool orb = isInteractiveOrb(object);
             if (hazard) ++g_state.knownHazards;
+            if (safeSurface) ++g_state.safeSurfaces;
             if (orb) ++g_state.recognizedOrbs;
 
             ScanTarget target;
@@ -298,10 +511,12 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
             target.dx = dx;
             target.dy = dy;
             target.hazard = hazard;
+            target.safeSurface = safeSurface;
             target.orb = orb;
             target.contactDistance = dx - approximateHalfWidth(object) - approximateHalfWidth(player);
             targets.push_back(target);
             if (hazard && dx > -30.f) hazards.push_back(target);
+            if (safeSurface && dx > -30.f) safeSurfaces.push_back(target);
             if (orb && dx > -30.f && std::abs(dy) <= 220.f) orbs.push_back(target);
         }
 
@@ -314,10 +529,32 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
         std::sort(orbs.begin(), orbs.end(), [](ScanTarget const& a, ScanTarget const& b) {
             return a.dx < b.dx;
         });
+        std::sort(safeSurfaces.begin(), safeSurfaces.end(), [](ScanTarget const& a, ScanTarget const& b) {
+            return a.contactDistance < b.contactDistance;
+        });
 
         ScanTarget const* nearestHazard = hazards.empty() ? nullptr : &hazards.front();
         ScanTarget const* nearestOrb = orbs.empty() ? nullptr : &orbs.front();
+        ScanTarget const* nearestSafeSurface = safeSurfaces.empty() ? nullptr : &safeSurfaces.front();
         if (nearestOrb) g_state.orbTargetId = nearestOrb->object->m_objectID;
+
+        // Produce a route signal from the preflight map: the next few events are
+        // ordered by position and described as dodge / land / orb / portal / pad.
+        std::string routeSignal;
+        int planItems = 0;
+        float lastSafeSignalX = -100000.f;
+        for (auto const& event : m_fields->routePlan) {
+            if (!event.object || event.object->m_isDisabled) continue;
+            const CCPoint eventPoint = nodeCenterInParent(event.object, this);
+            const float dx = eventPoint.x - playerCenter.x;
+            if (dx < -22.f) continue;
+            if (event.kind == RouteKind::SafeSurface && dx - lastSafeSignalX < 42.f) continue;
+            if (event.kind == RouteKind::SafeSurface) lastSafeSignalX = dx;
+            if (planItems > 0) routeSignal += "  >  ";
+            routeSignal += fmt::format("{} +{:.0f}", routeKindName(event.kind, event.object), std::max(0.f, dx));
+            if (++planItems >= 3) break;
+        }
+        g_state.routeSignal = planItems ? routeSignal : "ROUTE END / MAP PRECHECK DONE";
 
         float closingPerFrame = 0.f;
         if (nearestHazard && nearestHazard->object == m_fields->previousNearest &&
@@ -369,8 +606,11 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
                     if (rayCount >= 8) break;
                     if (target.dx < 0.f) continue;
                     const auto green = cocos2d::ccColor4F{0.12f, 1.00f, 0.52f, 0.92f};
-                    const auto lineColor = target.hazard ? red : (target.orb ? green : blue);
-                    draw->drawSegment(playerCenter, target.point, (target.hazard || target.orb) ? 1.8f : 0.7f, lineColor);
+                    const auto safeCyan = cocos2d::ccColor4F{0.20f, 0.82f, 1.00f, 0.92f};
+                    const auto lineColor = target.hazard ? red :
+                        (target.orb ? green : (target.safeSurface ? safeCyan : blue));
+                    draw->drawSegment(playerCenter, target.point,
+                        (target.hazard || target.orb || target.safeSurface) ? 1.6f : 0.7f, lineColor);
                     if (target.orb) {
                         const float radius = 12.f;
                         const CCPoint top{target.point.x, target.point.y + radius};
@@ -382,8 +622,7 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
                         draw->drawSegment(bottom, left, 1.7f, green);
                         draw->drawSegment(left, top, 1.7f, green);
                     }
-                    if (target.hazard) {
-                        draw->drawDot(target.point, 4.f, red);
+                    if (target.hazard || target.safeSurface) {
                         const float halfW = std::clamp(approximateHalfWidth(target.object), 6.f, 26.f);
                         const auto size = target.object->getContentSize();
                         const float halfH = std::clamp(size.height * std::abs(target.object->getScaleY()) * 0.5f, 6.f, 26.f);
@@ -391,10 +630,16 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
                         CCPoint tr{target.point.x + halfW, target.point.y + halfH};
                         CCPoint bl{target.point.x - halfW, target.point.y - halfH};
                         CCPoint br{target.point.x + halfW, target.point.y - halfH};
-                        draw->drawSegment(tl, tr, 1.0f, amber);
-                        draw->drawSegment(tr, br, 1.0f, amber);
-                        draw->drawSegment(br, bl, 1.0f, amber);
-                        draw->drawSegment(bl, tl, 1.0f, amber);
+                        const auto boxColor = target.hazard ? amber : safeCyan;
+                        const auto dotColor = target.hazard ? red : safeCyan;
+                        draw->drawDot(target.point, 4.f, dotColor);
+                        draw->drawSegment(tl, tr, 1.2f, boxColor);
+                        draw->drawSegment(tr, br, 1.0f, boxColor);
+                        draw->drawSegment(br, bl, 1.0f, boxColor);
+                        draw->drawSegment(bl, tl, 1.0f, boxColor);
+                        if (target.safeSurface) {
+                            draw->drawSegment(tl, tr, 2.0f, safeCyan); // cyan top/landing marker
+                        }
                     }
                     ++rayCount;
                 }
@@ -403,13 +648,21 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
                     draw->drawSegment(playerCenter, nearestHazard->point, 2.4f, red);
                     draw->drawDot(playerCenter, 4.f, cyan);
                 }
+                if (nearestOrb) {
+                    draw->drawSegment(playerCenter, nearestOrb->point, 1.8f, green);
+                }
+                if (nearestSafeSurface) {
+                    draw->drawSegment(playerCenter, nearestSafeSurface->point, 1.4f,
+                        cocos2d::ccColor4F{0.20f, 0.82f, 1.00f, 0.75f});
+                }
             }
         }
 
-        // Fast controller: use measured contact distance and per-frame closing speed.
-        // The old fixed 82px lower bound jumped too early; this uses a short lead window.
+        // Fast controller with separate target logic:
+        // red = lethal dodge, cyan = safe solid surface, green = jump-activated orb.
         const bool orbAssist = mod->getSettingValue<bool>("orb-assist");
         bool orbAction = false;
+        bool platformAction = false;
         const float playerHalfW = approximateHalfWidth(player);
         const float playerHalfH = std::max(6.f, player->getContentSize().height *
             std::abs(player->getScaleY()) * 0.5f);
@@ -420,39 +673,96 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
                 std::abs(nearestOrb->object->getScaleY()) * 0.5f);
             const float edgeGapX = nearestOrb->dx - playerHalfW - orbHalfW;
             const float edgeGapY = std::abs(nearestOrb->dy) - playerHalfH - orbHalfH;
-            const float orbLead = std::clamp(closingPerFrame * 1.25f + 2.f, 4.f, 16.f);
+            const float orbLead = std::clamp(closingPerFrame * 1.15f + 1.f, 3.f, 13.f);
             const bool inOrbContactWindow =
-                edgeGapX <= orbLead && edgeGapX >= -12.f &&
-                edgeGapY <= 10.f && nearestOrb->dx >= -18.f;
+                edgeGapX <= orbLead && edgeGapX >= -10.f &&
+                edgeGapY <= 10.f && nearestOrb->dx >= -16.f;
 
-            // A high orb often needs an approach jump, followed by a second tap inside
-            // the interaction window. Only launch once per orb, and do it closer than
-            // the old generic spike threshold.
             const float orbApproachDistance = std::clamp(
-                closingPerFrame * 5.0f + std::max(0.f, nearestOrb->dy) * 0.22f,
-                52.f, 112.f);
+                closingPerFrame * 4.5f + std::max(0.f, nearestOrb->dy) * 0.20f,
+                44.f, 100.f);
             const bool shouldApproachOrb = pulseControlMode(mode) &&
                 nearestOrb->dy > std::max(28.f, playerHalfH + orbHalfH * 0.45f) &&
                 nearestOrb->contactDistance <= orbApproachDistance &&
-                nearestOrb->contactDistance > orbLead + 12.f &&
-                nearestOrb->dx > 12.f &&
+                nearestOrb->contactDistance > orbLead + 10.f &&
+                nearestOrb->dx > 10.f &&
                 nearestOrb->object != m_fields->lastOrbApproach;
 
             if (inOrbContactWindow && nearestOrb->object != m_fields->lastOrbTriggered) {
                 player->pushButton(PlayerButton::Jump);
                 m_fields->releaseNextFrame = true;
-                m_fields->releaseCooldown = 0.10f;
+                m_fields->releaseCooldown = 0.095f;
                 m_fields->lastOrbTriggered = nearestOrb->object;
-                g_state.action = fmt::format("ORB TAP / {}", orbName(nearestOrb->object->m_objectID));
+                g_state.action = fmt::format("ORB TAP / {}", orbName(nearestOrb->object));
                 orbAction = true;
             } else if (shouldApproachOrb) {
                 player->pushButton(PlayerButton::Jump);
                 m_fields->releaseNextFrame = true;
-                m_fields->releaseCooldown = 0.16f;
+                m_fields->releaseCooldown = 0.15f;
                 m_fields->lastOrbApproach = nearestOrb->object;
-                g_state.action = fmt::format("APPROACH / {}", orbName(nearestOrb->object->m_objectID));
+                g_state.action = fmt::format("APPROACH / {}", orbName(nearestOrb->object));
                 orbAction = true;
+            } else if (nearestOrb->object->m_objectID == 1704 || nearestOrb->object->m_objectID == 1751) {
+                // Dash rings activate on contact; don't waste a jump press on them.
+                g_state.action = "DASH RING / CONTACT";
             }
+        }
+
+        // Safe blocks are not red danger. If the next cyan solid is a genuine step-up,
+        // jump only inside a short lead window and prefer its top unless a hazard covers it.
+        bool safeStepNeedsJump = false;
+        bool landingTopBlocked = false;
+        float platformTriggerDistance = 0.f;
+        float selectedStepHeight = 0.f;
+        ScanTarget const* stepSurfaceTarget = nullptr;
+
+        // Skip same-height floor blocks; select the first cyan platform whose top
+        // actually requires a jump from the player's current feet height.
+        for (auto const& platform : safeSurfaces) {
+            const float platformHalfH = std::max(4.f,
+                platform.object->getContentSize().height *
+                std::abs(platform.object->getScaleY()) * 0.5f);
+            const float playerFoot = playerCenter.y - playerHalfH;
+            const float platformTop = platform.point.y + platformHalfH;
+            const float stepHeight = platformTop - playerFoot;
+            if (stepHeight > 8.f && stepHeight < 118.f &&
+                platform.contactDistance > -10.f &&
+                platform.contactDistance < 180.f) {
+                stepSurfaceTarget = &platform;
+                selectedStepHeight = stepHeight;
+                break;
+            }
+        }
+
+        if (stepSurfaceTarget && pulseControlMode(mode)) {
+            platformTriggerDistance = std::clamp(
+                closingPerFrame * static_cast<float>(leadFrames) +
+                std::max(0.f, selectedStepHeight) * 0.22f + 4.f, 22.f, 82.f);
+
+            const float platformHalfH = std::max(4.f,
+                stepSurfaceTarget->object->getContentSize().height *
+                std::abs(stepSurfaceTarget->object->getScaleY()) * 0.5f);
+            const float platformTopY = stepSurfaceTarget->point.y + platformHalfH;
+            const float platformRight = stepSurfaceTarget->point.x +
+                approximateHalfWidth(stepSurfaceTarget->object);
+
+            for (auto const& danger : hazards) {
+                const float hazardHalfW = approximateHalfWidth(danger.object);
+                const float hazardHalfH = std::max(4.f,
+                    danger.object->getContentSize().height *
+                    std::abs(danger.object->getScaleY()) * 0.5f);
+                const bool overlapsPlatformRun =
+                    danger.point.x + hazardHalfW > stepSurfaceTarget->point.x - playerHalfW &&
+                    danger.point.x - hazardHalfW < platformRight + playerHalfW;
+                const bool hazardAboveTop =
+                    danger.point.y - hazardHalfH < platformTopY + 88.f &&
+                    danger.point.y + hazardHalfH > platformTopY + 2.f;
+                if (overlapsPlatformRun && hazardAboveTop) {
+                    landingTopBlocked = true;
+                    break;
+                }
+            }
+            safeStepNeedsJump = true;
         }
 
         if (enabled && mode == PilotMode::Platformer && !m_fields->rightHeld) {
@@ -461,7 +771,7 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
         }
 
         if (orbAction) {
-            // The one-frame orb input takes priority over normal mode steering.
+            // Keep the orb input for this frame; don't override it with another mode.
         } else if (!enabled) {
             if (m_fields->jumpHeld) {
                 player->releaseButton(PlayerButton::Jump);
@@ -473,7 +783,7 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
             }
         } else if (holdControlMode(mode)) {
             bool wantHold = false;
-            const float steeringWindow = std::max(8.f, static_cast<float>(leadFrames * 1.8f));
+            const float steeringWindow = std::max(7.f, static_cast<float>(leadFrames * 1.6f));
             const bool imminentHazard = nearestHazard && framesToImpact >= 0.f &&
                                          framesToImpact <= steeringWindow;
             if (imminentHazard) {
@@ -490,15 +800,27 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
                 else player->releaseButton(PlayerButton::Jump);
                 m_fields->jumpHeld = wantHold;
             }
+        } else if (safeStepNeedsJump && !landingTopBlocked &&
+                   stepSurfaceTarget->contactDistance <= platformTriggerDistance &&
+                   stepSurfaceTarget->object != m_fields->lastSafePlatform &&
+                   (!nearestHazard || stepSurfaceTarget->contactDistance <= nearestHazard->contactDistance + 8.f) &&
+                   m_fields->releaseCooldown <= 0.f) {
+            player->pushButton(PlayerButton::Jump);
+            m_fields->releaseNextFrame = true;
+            m_fields->releaseCooldown = 0.095f;
+            m_fields->lastSafePlatform = stepSurfaceTarget->object;
+            g_state.action = fmt::format("JUMP TO SAFE BLOCK / +{:.0f}px", platformTriggerDistance);
+            platformAction = true;
         } else if (nearestHazard && pulseControlMode(mode) && m_fields->releaseCooldown <= 0.f) {
             const float speedLeadDistance = closingPerFrame * static_cast<float>(leadFrames);
-            const float triggerDistance = std::clamp(speedLeadDistance + 7.f, 24.f, 68.f);
+            const float triggerDistance = std::clamp(speedLeadDistance + 4.f, 20.f, 58.f);
             const bool inTimingWindow =
                 (framesToImpact >= 0.f && framesToImpact <= static_cast<float>(leadFrames)) ||
                 nearestHazard->contactDistance <= triggerDistance;
 
             if (!inTimingWindow) {
-                g_state.action = fmt::format("TRACK / ETA {} / TRIG {:.0f}", etaText(framesToImpact), triggerDistance);
+                g_state.action = fmt::format("DODGE RED / ETA {} / TRIG {:.0f}",
+                    etaText(framesToImpact), triggerDistance);
             } else {
                 const bool sameHazard = nearestHazard->object == m_fields->lastTriggeredHazard;
                 if (!sameHazard) {
@@ -508,20 +830,30 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
                     m_fields->lastTriggeredHazard = nearestHazard->object;
                     m_fields->lastTriggeredX = nearestHazard->point.x;
                     m_fields->lastTriggeredId = nearestHazard->object->m_objectID;
-                    g_state.action = fmt::format("JUMP / {}F WINDOW", leadFrames);
+                    g_state.action = fmt::format("DODGE RED / {}F", leadFrames);
                 } else {
-                    g_state.action = "TARGET ALREADY TRIGGERED";
+                    g_state.action = "TRACK RED / ALREADY TAPPED";
                 }
             }
         } else if (enabled) {
             if (mode == PilotMode::Platformer) {
                 g_state.action = nearestHazard
-                    ? fmt::format("MOVE RIGHT / ETA {}", etaText(framesToImpact))
-                    : "MOVE RIGHT / SEARCH";
+                    ? fmt::format("MOVE RIGHT / DODGE ETA {}", etaText(framesToImpact))
+                    : "MOVE RIGHT / ROUTE CLEAR";
+            } else if (safeStepNeedsJump && landingTopBlocked) {
+                g_state.action = "SAFE BLOCK / TOP BLOCKED BY RED";
+            } else if (safeStepNeedsJump) {
+                g_state.action = "SAFE BLOCK / ALIGN LANDING";
+            } else if (nearestSafeSurface && std::abs(
+                       (nearestSafeSurface->point.y +
+                        nearestSafeSurface->object->getContentSize().height *
+                        std::abs(nearestSafeSurface->object->getScaleY()) * 0.5f) -
+                       (playerCenter.y - playerHalfH)) < 8.f) {
+                g_state.action = "SAFE SURFACE / LAND";
             } else if (nearestOrb) {
-                g_state.action = fmt::format("TRACK ORB / {}", orbName(nearestOrb->object->m_objectID));
+                g_state.action = fmt::format("TRACK ORB / {}", orbName(nearestOrb->object));
             } else {
-                g_state.action = nearestHazard ? fmt::format("TRACK / ETA {}", etaText(framesToImpact)) : "SEARCHING";
+                g_state.action = nearestHazard ? fmt::format("TRACK RED / ETA {}", etaText(framesToImpact)) : "ROUTE CLEAR";
             }
         }
 
@@ -543,6 +875,12 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
             nearestOrb->object != m_fields->lastOrbApproach && nearestOrb->dx < -36.f) {
             m_fields->lastOrbApproach = nullptr;
         }
+        if (m_fields->lastSafePlatform &&
+            (!stepSurfaceTarget ||
+             (stepSurfaceTarget->object != m_fields->lastSafePlatform &&
+              stepSurfaceTarget->dx < -42.f))) {
+            m_fields->lastSafePlatform = nullptr;
+        }
 
         g_state.action = g_state.action.empty() ? "IDLE" : g_state.action;
 
@@ -550,12 +888,18 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
             m_fields->hudLabel->setVisible(hudEnabled);
             if (hudEnabled) {
                 const std::string hud = fmt::format(
-                    "GEOPILOT  {}  |  AUTO {}\nFRAME {}  FPS {:.0f}  DT {:.4f}s\n"
-                    "SCAN {} objects / {} hazards / {} orbs  |  LEAD {}f\n"
-                    "TARGET {}  DIST {:.1f}  ETA {}  ORB {}  |  {}",
+                    "GEOPILOT {} | AUTO {} | MAP {} {:.1f}%\n"
+                    "MAP H{} B{} O{} PORT{} PAD{} | FRAME {} FPS {:.0f}\n"
+                    "SCAN {} objects / {} red / {} cyan / {} orb | LEAD {}f\n"
+                    "PLAN {}\n"
+                    "TARGET {} DIST {:.1f} ETA {} ORB {} | {}",
                     g_state.mode, enabled ? "ON" : "OFF",
-                    g_state.frame, g_state.fps, g_state.dt,
-                    g_state.scannedObjects, g_state.knownHazards, g_state.recognizedOrbs, leadFrames,
+                    g_state.mapReady ? "READY" : "SCAN", g_state.mapProgress,
+                    g_state.mapHazards, g_state.mapSafeSurfaces, g_state.mapOrbs,
+                    g_state.mapPortals, g_state.mapPads, g_state.frame, g_state.fps,
+                    g_state.scannedObjects, g_state.knownHazards, g_state.safeSurfaces,
+                    g_state.recognizedOrbs, leadFrames,
+                    g_state.routeSignal,
                     g_state.targetId < 0 ? "--" : std::to_string(g_state.targetId),
                     g_state.distance, etaText(g_state.framesToImpact),
                     g_state.orbTargetId < 0 ? "--" : std::string(orbName(g_state.orbTargetId)), g_state.action
@@ -659,10 +1003,16 @@ protected:
 
         if (m_statusLabel) {
             const std::string status = fmt::format(
-                "MODE {}   FRAME {}   FPS {:.0f}\nSCAN {} objects / {} hazards / {} orbs\n"
-                "HAZARD {}  ETA {}  ORB {}  ACTION {}",
-                g_state.mode, g_state.frame, g_state.fps,
-                g_state.scannedObjects, g_state.knownHazards, g_state.recognizedOrbs,
+                "MAP PRECHECK {} {:.1f}% | H{} B{} O{} P{} PAD{}\n"
+                "NEXT: {}\nMODE {} FRAME {} FPS {:.0f}\n"
+                "SCAN {} objects / {} red / {} cyan / {} orb\n"
+                "TARGET {} ETA {} ORB {} ACTION {}",
+                g_state.mapReady ? "READY" : "WAIT",
+                g_state.mapProgress, g_state.mapHazards, g_state.mapSafeSurfaces,
+                g_state.mapOrbs, g_state.mapPortals, g_state.mapPads,
+                g_state.routeSignal, g_state.mode, g_state.frame, g_state.fps,
+                g_state.scannedObjects, g_state.knownHazards, g_state.safeSurfaces,
+                g_state.recognizedOrbs,
                 g_state.targetId < 0 ? "--" : std::to_string(g_state.targetId),
                 etaText(g_state.framesToImpact),
                 g_state.orbTargetId < 0 ? "--" : std::string(orbName(g_state.orbTargetId)),
