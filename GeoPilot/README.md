@@ -28,3 +28,5 @@ geode build
 
 ## Status
 GitHub Actions performs the build; source in this branch is not a precompiled binary. In-game performance and level completion have not yet been verified. The heuristic will fail on many levels.
+
+Build workflow is also present on the default branch to allow manual runs. The workflow checks out the `geopilot-build` branch for sources.
