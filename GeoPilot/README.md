@@ -1,32 +1,31 @@
-# GeoPilot Auto Play (Experimental)
+# GeoPilot Auto Play v0.2.0 (Experimental)
 
-**Target:** Geometry Dash 2.2081 + Geode v5.10.1.
+**Target:** Geometry Dash 2.2081 + Geode 5.10.1.
 
-GeoPilot is an early native Geode mod prototype. It exposes options in Geode's in-game mod settings and uses object-ID/position heuristics to react to a limited set of common hazards. It is not a complete physics solver and is not a validated completion bot.
+## What's new
+- Scanner fan and rays drawn while playing.
+- Rays/boxes highlight recognized spike and saw object IDs; blue rays also show scanned objects.
+- Live HUD: detected mode, frame counter, FPS, delta time, scan counts, target ID, estimated distance, ETA in update frames and current bot action.
+- Current mode auto-detected from PlayerObject state; manual override remains in Geode settings.
+- Pause-menu controls: AUTO PLAY, SCAN RAYS, HUD, and JUMP LEAD frame cycle.
+- Timing uses per-frame closing-distance measurements where available, with velocity/delta-time fallback.
 
-## Settings
-- **Enable Auto Play:** off by default.
-- **Game Mode:** Auto or manual mode override.
-- **Reaction Distance:** how early the heuristic reacts.
-- **Debug Log:** occasional controller decisions.
+## Pause menu
+Pause Geometry Dash (Esc on desktop, the pause control on touch platforms). The GeoPilot controls appear at the upper right. Use:
+- **AUTO PLAY** to turn the controller on/off.
+- **SCAN RAYS** to toggle ray and hazard-box rendering.
+- **HUD** to toggle live diagnostic text.
+- **JUMP LEAD** to cycle the number of frames before predicted contact.
 
-The current controller taps for Cube/Ball/UFO/Robot/Spider/Swing/Platformer and uses a basic hold/release heuristic for Ship/Wave. Portals, gravity/speed triggers, orbs and pads, dual mode, moving hazards, custom objects, and complex Ship/Wave corridors require a more complete physics/pathfinding model.
+The Geode mod settings also expose scan distance, manual mode override, and debug logs.
 
-## Download the .geode
-Open the repository's **Actions** tab, select **Build GeoPilot (Geode 5.10.1)**, and download artifact **GeoPilot-Geode-v5.10.1-GD-2.2081** after all platform jobs succeed. Extract the artifact ZIP to get the multi-platform `.geode` package.
+## Important limits
+This is still a heuristic controller, not a full physics engine. It recognizes a maintained list of common spike/saw IDs and can miss custom hazards, solid-block sides, moving objects, orbs/pads, portals, dual-player routing, gravity/speed triggers, and complex Ship/Wave corridors. Timing estimates are based on observed closing distance and can be noisy during speed changes or camera/portal transitions. Mode detection is automatic, but successful completion of every level is not guaranteed. Test in practice mode first and adjust JUMP LEAD and scan distance.
 
-The package contains separate native builds for Windows x64, macOS, iOS, Android 32-bit, and Android 64-bit. It is not one native binary that runs unchanged on every operating system.
+## Build / download
+Open Actions and choose Build GeoPilot (Geode 5.10.1), then download artifact GeoPilot-Geode-v5.10.1-GD-2.2081 after a successful run. The artifact contains separate native builds for Windows x64, macOS, iOS, Android32 and Android64, combined into a multi-platform .geode package.
 
-## Local build
-Install the Geode CLI and matching SDK, then run:
-
-```sh
-geode sdk install
-geode sdk install-binaries
-geode build
-```
-
-## Status
-GitHub Actions performs the build; source in this branch is not a precompiled binary. In-game performance and level completion have not yet been verified. The heuristic will fail on many levels.
-
-Build workflow is also present on the default branch to allow manual runs. The workflow checks out the `geopilot-build` branch for sources.
+Local SDK build:
+- geode sdk install
+- geode sdk install-binaries
+- geode build
