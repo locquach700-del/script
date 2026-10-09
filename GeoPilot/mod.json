@@ -1,17 +1,79 @@
 {
   "geode": "5.10.1",
-  "gd": {"win":"2.2081","mac":"2.2081","android":"2.2081","ios":"2.2081"},
-  "id":"noob.geopilot",
-  "name":"GeoPilot Auto Play",
-  "version":"v0.1.0",
-  "developer":"Noob",
-  "description":"Experimental obstacle-aware auto-play controller with in-game settings.",
-  "repository":"https://github.com/locquach700-del/script/tree/geopilot-build/GeoPilot",
-  "settings":{
-    "controller-title":{"type":"title","name":"GeoPilot Controller","description":"Configure the experimental automatic controller."},
-    "auto-play":{"type":"bool","name":"Enable Auto Play","description":"Automatically react to recognized hazards during a level.","default":false},
-    "control-mode":{"type":"string","name":"Game Mode","description":"Auto reads the player mode. Manual values override detection.","default":"Auto","one-of":["Auto","Cube","Ship","Ball","UFO","Wave","Robot","Spider","Swing","Platformer"]},
-    "reaction-distance":{"type":"int","name":"Reaction Distance","description":"Horizontal distance in game units for the hazard heuristic.","default":85,"min":35,"max":180,"control":{"slider":true,"input":true,"slider-step":5}},
-    "show-debug-log":{"type":"bool","name":"Debug Log","description":"Log controller decisions to the Geode log.","default":false}
+  "gd": {
+    "win": "2.2081",
+    "mac": "2.2081",
+    "android": "2.2081",
+    "ios": "2.2081"
+  },
+  "id": "noob.geopilot",
+  "name": "GeoPilot Auto Play",
+  "version": "v0.2.0",
+  "developer": "Noob",
+  "description": "Auto-detecting Geometry Dash controller with scanner rays, frame ETA, HUD and pause-menu controls.",
+  "repository": "https://github.com/locquach700-del/script/tree/geopilot-build/GeoPilot",
+  "settings": {
+    "controller-title": {
+      "type": "title",
+      "name": "GeoPilot Controller",
+      "description": "Control the scanner and timing predictor."
+    },
+    "auto-play": {
+      "type": "bool",
+      "name": "Enable Auto Play",
+      "description": "Automatically react to recognized spikes and saws.",
+      "default": false
+    },
+    "control-mode": {
+      "type": "string",
+      "name": "Game Mode",
+      "description": "Auto detects the current player mode. Manual values override detection.",
+      "default": "Auto",
+      "one-of": ["Auto", "Cube", "Ship", "Ball", "UFO", "Wave", "Robot", "Spider", "Swing", "Platformer"]
+    },
+    "reaction-distance": {
+      "type": "int",
+      "name": "Scanner Range",
+      "description": "Forward scan distance in game coordinate units.",
+      "default": 420,
+      "min": 150,
+      "max": 700,
+      "control": {
+        "slider": true,
+        "input": true,
+        "slider-step": 10
+      }
+    },
+    "lead-frames": {
+      "type": "int",
+      "name": "Jump Lead (Frames)",
+      "description": "How many measured update frames before contact the bot should act.",
+      "default": 10,
+      "min": 4,
+      "max": 24,
+      "control": {
+        "slider": true,
+        "input": true,
+        "slider-step": 2
+      }
+    },
+    "show-rays": {
+      "type": "bool",
+      "name": "Show Scan Rays",
+      "description": "Draw scan fan, object rays and boxes around recognized hazards.",
+      "default": true
+    },
+    "show-hud": {
+      "type": "bool",
+      "name": "Show Timing HUD",
+      "description": "Show mode, frame counter, FPS, scanned objects, target, ETA and current action.",
+      "default": true
+    },
+    "show-debug-log": {
+      "type": "bool",
+      "name": "Debug Log",
+      "description": "Log controller decisions to the Geode log once per second.",
+      "default": false
+    }
   }
 }
