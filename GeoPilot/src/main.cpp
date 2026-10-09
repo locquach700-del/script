@@ -386,9 +386,21 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
                 m_fields->jumpHeld = wantHold;
             }
         } else if (nearestHazard && pulseControlMode(mode) &&
-                   framesToImpact >= 0.f && framesToImpact <= static_cast<float>(leadFrames) &&
                    m_fields->releaseCooldown <= 0.f) {
-            const bool sameHazard = nearestHazard->object == m_fields->lastTriggeredHazard;
+            // ETA-only gating can deadlock when the game's velocity API reports a low
+            // value during scroll/portal transitions. Keep a speed-scaled lead distance,
+            // but enforce a minimum collision window so a visible spike still triggers.
+            const float speedLeadDistance = closingPerFrame * static_cast<float>(leadFrames);
+            const float triggerDistance = std::clamp(
+                std::max(82.f, speedLeadDistance), 82.f, 190.f);
+            const bool inTimingWindow =
+                (framesToImpact >= 0.f && framesToImpact <= static_cast<float>(leadFrames)) ||
+                nearestHazard->contactDistance <= triggerDistance;
+
+            if (!inTimingWindow) {
+                g_state.action = fmt::format("TRACK / ETA {} / NEED {:.0f}", etaText(framesToImpact), triggerDistance);
+            } else {
+                const bool sameHazard = nearestHazard->object == m_fields->lastTriggeredHazard;
             if (!sameHazard) {
                 player->pushButton(PlayerButton::Jump);
                 m_fields->releaseNextFrame = true;
@@ -397,8 +409,9 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
                 m_fields->lastTriggeredX = nearestHazard->point.x;
                 m_fields->lastTriggeredId = nearestHazard->object->m_objectID;
                 g_state.action = fmt::format("JUMP / {}F LEAD", leadFrames);
-            } else {
-                g_state.action = "TARGET ALREADY TRIGGERED";
+                } else {
+                    g_state.action = "TARGET ALREADY TRIGGERED";
+                }
             }
         } else if (enabled) {
             if (mode == PilotMode::Platformer) {
