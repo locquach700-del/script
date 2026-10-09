@@ -1,4 +1,4 @@
-# GeoPilot Auto Play v0.2.0 (Experimental)
+# GeoPilot Auto Play v0.2.1 (Experimental)
 
 **Target:** Geometry Dash 2.2081 + Geode 5.10.1.
 
@@ -9,6 +9,7 @@
 - Current mode auto-detected from PlayerObject state; manual override remains in Geode settings.
 - Pause-menu controls: AUTO PLAY, SCAN RAYS, HUD, and JUMP LEAD frame cycle.
 - Timing uses per-frame closing-distance measurements where available, with velocity/delta-time fallback.
+- Ship/Wave steering only commits to a hazard lane inside a predicted approach window; Platformer mode holds Right while scanning and jumps on recognized hazards.
 
 ## Pause menu
 Pause Geometry Dash (Esc on desktop, the pause control on touch platforms). The GeoPilot controls appear at the upper right. Use:
