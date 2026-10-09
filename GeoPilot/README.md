@@ -1,11 +1,11 @@
-# GeoPilot Auto Play v0.3.0 (Experimental)
+# GeoPilot Auto Play v0.3.1 (Experimental)
 
 **Target:** Geometry Dash 2.2081 + Geode 5.10.1.
 
-## What's new in v0.3.0
+## What's new in v0.3.1
 - Single GeoPilot logo button in the Pause menu. Click it to open a separate Control Center popup.
 - The popup contains Auto Play, Orb Assist, Scan Rays, HUD, mode override, jump lead frames and scan range.
-- Bundled GeoPilot logo resource used by the Pause button and settings panel.
+- Bundled GeoPilot logo resource used by the Pause button and settings panel; declared in mod.json resources.files so it is included in the .geode package.
 - Recognizes common jump-activated orbs by object ID: yellow, blue, pink, green, black, red, toggle, spider and teleport.
 - Orb approach tap and orb contact tap are separate actions; the HUD reports which orb is being tracked.
 - Spike timing no longer uses an 82px minimum lead. It uses measured per-frame closing speed and a shorter 2–10 frame lead window.

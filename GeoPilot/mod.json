@@ -8,9 +8,9 @@
   },
   "id": "noob.geopilot",
   "name": "GeoPilot Auto Play",
-  "version": "v0.3.0",
+  "version": "v0.3.1",
   "developer": "Noob",
-  "description": "Auto mode detection, spike timing, orb assist, scan rays and compact pause-menu control center.",
+  "description": "Auto mode detection, spike timing, orb assist, scan rays and compact pause-menu control center with bundled logo.",
   "repository": "https://github.com/locquach700-del/script/tree/geopilot-build/GeoPilot",
   "settings": {
     "controller-title": {
@@ -92,5 +92,10 @@
       "description": "Predict approaching yellow, green, pink, blue, red, black and special jump orbs.",
       "default": true
     }
+  },
+  "resources": {
+    "files": [
+      "resources/geopilot-logo.png"
+    ]
   }
 }
