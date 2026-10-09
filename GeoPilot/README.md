@@ -1,33 +1,35 @@
-# GeoPilot Auto Play v0.2.2 (Experimental)
+# GeoPilot Auto Play v0.3.0 (Experimental)
 
 **Target:** Geometry Dash 2.2081 + Geode 5.10.1.
 
-## What's new
-- Scanner fan and rays drawn while playing.
-- Rays/boxes highlight recognized spike and saw object IDs; blue rays also show scanned objects.
-- Live HUD: detected mode, frame counter, FPS, delta time, scan counts, target ID, estimated distance, ETA in update frames and current bot action.
-- Current mode auto-detected from PlayerObject state; manual override remains in Geode settings.
-- Pause-menu controls: AUTO PLAY, SCAN RAYS, HUD, and JUMP LEAD frame cycle.
-- Timing uses per-frame closing-distance measurements where available, with velocity/delta-time fallback.
-- Fixed the no-jump edge case: pulse modes use ETA when reliable or a speed-scaled minimum collision-distance window.
-- Ship/Wave steering only commits to a hazard lane inside a predicted approach window; Platformer mode holds Right while scanning and jumps on recognized hazards.
+## What's new in v0.3.0
+- Single GeoPilot logo button in the Pause menu. Click it to open a separate Control Center popup.
+- The popup contains Auto Play, Orb Assist, Scan Rays, HUD, mode override, jump lead frames and scan range.
+- Bundled GeoPilot logo resource used by the Pause button and settings panel.
+- Recognizes common jump-activated orbs by object ID: yellow, blue, pink, green, black, red, toggle, spider and teleport.
+- Orb approach tap and orb contact tap are separate actions; the HUD reports which orb is being tracked.
+- Spike timing no longer uses an 82px minimum lead. It uses measured per-frame closing speed and a shorter 2–10 frame lead window.
+- The HUD reports recognized orb count and the current timing action.
 
-## Pause menu
-Pause Geometry Dash (Esc on desktop, the pause control on touch platforms). The GeoPilot controls appear at the upper right. Use:
-- **AUTO PLAY** to turn the controller on/off.
-- **SCAN RAYS** to toggle ray and hazard-box rendering.
-- **HUD** to toggle live diagnostic text.
-- **JUMP LEAD** to cycle the number of frames before predicted contact.
+## Use
+1. Install the generated `.geode` for Geometry Dash 2.2081 / Geode 5.10.1.
+2. Start a level and open Pause (Esc on desktop; pause control on touch devices).
+3. Click the single GeoPilot logo. The Control Center opens.
+4. Enable **AUTO PLAY**, leave **ORB ASSIST** on to test orb input, and tune **LEAD** / **SCAN RANGE** from that panel.
+5. Watch Scan Rays and the HUD. Use practice mode while tuning; if a level's speed changes, adjust the lead window.
 
-The Geode mod settings also expose scan distance, manual mode override, and debug logs.
-
-## Important limits
-This is still a heuristic controller, not a full physics engine. It recognizes a maintained list of common spike/saw IDs and can miss custom hazards, solid-block sides, moving objects, orbs/pads, portals, dual-player routing, gravity/speed triggers, and complex Ship/Wave corridors. Timing estimates are based on observed closing distance and can be noisy during speed changes or camera/portal transitions. Mode detection is automatic, but successful completion of every level is not guaranteed. Test in practice mode first and adjust JUMP LEAD and scan distance.
+## Controller model and limits
+- Pulse modes use a speed-adaptive contact threshold for common spikes/saws.
+- Ship and Wave use a separate hold/release heuristic.
+- Platformer mode keeps Right pressed and jumps at recognized hazards.
+- Orb assist recognizes common jump-activated orb IDs and checks horizontal and vertical hitbox gaps before tapping. High orbs may receive a separate approach jump before the contact tap.
+- Mode detection reads PlayerObject state for Cube, Ship, Ball, UFO, Wave, Robot, Spider, Swing and Platformer, with a manual override in the Control Center.
+- This remains a heuristic controller, not a complete engine-level simulation. It can miss custom hazards, moving obstacles, speed/gravity portals, dual routes, pads/orbs with unusual paths and precise Wave/Ship corridors. Every Geometry Dash level cannot be guaranteed to finish automatically.
 
 ## Build / download
-Open Actions and choose Build GeoPilot (Geode 5.10.1), then download artifact GeoPilot-Geode-v5.10.1-GD-2.2081 after a successful run. The artifact contains separate native builds for Windows x64, macOS, iOS, Android32 and Android64, combined into a multi-platform .geode package.
+Open **Actions → Build GeoPilot (Geode 5.10.1)** and download artifact **GeoPilot-Geode-v5.10.1-GD-2.2081** after a successful run. The artifact contains separate native builds for Windows x64, macOS, iOS, Android 32-bit and Android 64-bit, combined into one multi-platform `.geode` package.
 
 Local SDK build:
-- geode sdk install
-- geode sdk install-binaries
-- geode build
+- `geode sdk install`
+- `geode sdk install-binaries`
+- `geode build`

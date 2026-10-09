@@ -12,6 +12,7 @@
 #include <Geode/binding/ButtonSprite.hpp>
 #include <Geode/binding/CCMenuItemSpriteExtra.hpp>
 #include <Geode/cocos/draw_nodes/CCDrawNode.h>
+#include <Geode/ui/Popup.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -36,9 +37,11 @@ namespace {
         float playerY = 0.f;
         int scannedObjects = 0;
         int knownHazards = 0;
+        int recognizedOrbs = 0;
         std::string mode = "Unknown";
         std::string action = "INITIALIZING";
         int targetId = -1;
+        int orbTargetId = -1;
         bool enabled = false;
     };
 
@@ -106,6 +109,32 @@ namespace {
         }
     }
 
+    // Jump-activated Geometry Dash orbs. Dash orbs are excluded because they
+    // trigger on contact without a jump press.
+    bool isInteractiveOrb(int id) {
+        switch (id) {
+            case 36: case 84: case 141: case 1022:
+            case 1330: case 1333: case 1594: case 3004: case 3027:
+                return true;
+            default: return false;
+        }
+    }
+
+    const char* orbName(int id) {
+        switch (id) {
+            case 36: return "YELLOW";
+            case 84: return "BLUE";
+            case 141: return "PINK";
+            case 1022: return "GREEN";
+            case 1330: return "BLACK";
+            case 1333: return "RED";
+            case 1594: return "TOGGLE";
+            case 3004: return "SPIDER";
+            case 3027: return "TELEPORT";
+            default: return "ORB";
+        }
+    }
+
     bool holdControlMode(PilotMode mode) {
         return mode == PilotMode::Ship || mode == PilotMode::Wave;
     }
@@ -124,6 +153,7 @@ namespace {
         float dy = 0.f;
         float contactDistance = 0.f;
         bool hazard = false;
+        bool orb = false;
     };
 
     CCPoint nodeCenterInParent(CCNode* node, CCNode* parent) {
@@ -154,6 +184,8 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
         float previousNearestDx = -1.f;
         GameObject* previousNearest = nullptr;
         GameObject* lastTriggeredHazard = nullptr;
+        GameObject* lastOrbApproach = nullptr;
+        GameObject* lastOrbTriggered = nullptr;
         float lastTriggeredX = -100000.f;
         int lastTriggeredId = -1;
         float releaseCooldown = 0.f;
@@ -206,6 +238,8 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
             if (player && player->m_isDead) {
                 m_fields->previousNearest = nullptr;
                 m_fields->lastTriggeredHazard = nullptr;
+                m_fields->lastOrbApproach = nullptr;
+                m_fields->lastOrbTriggered = nullptr;
                 m_fields->jumpHeld = false;
             }
             return;
@@ -230,14 +264,17 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
         g_state.playerY = playerCenter.y;
         g_state.scannedObjects = 0;
         g_state.knownHazards = 0;
+        g_state.recognizedOrbs = 0;
         g_state.distance = -1.f;
         g_state.framesToImpact = -1.f;
         g_state.targetId = -1;
+        g_state.orbTargetId = -1;
         g_state.closingRate = 0.f;
         g_state.action = enabled ? "SCANNING" : "SCAN ONLY";
 
         std::vector<ScanTarget> targets;
         std::vector<ScanTarget> hazards;
+        std::vector<ScanTarget> orbs;
         auto objects = geode::cocos::CCArrayExt<GameObject*>(m_objects);
 
         for (auto* object : objects) {
@@ -251,7 +288,9 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
 
             ++g_state.scannedObjects;
             const bool hazard = isKnownHazard(object->m_objectID);
+            const bool orb = isInteractiveOrb(object->m_objectID);
             if (hazard) ++g_state.knownHazards;
+            if (orb) ++g_state.recognizedOrbs;
 
             ScanTarget target;
             target.object = object;
@@ -259,9 +298,11 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
             target.dx = dx;
             target.dy = dy;
             target.hazard = hazard;
+            target.orb = orb;
             target.contactDistance = dx - approximateHalfWidth(object) - approximateHalfWidth(player);
             targets.push_back(target);
             if (hazard && dx > -30.f) hazards.push_back(target);
+            if (orb && dx > -30.f && std::abs(dy) <= 220.f) orbs.push_back(target);
         }
 
         std::sort(targets.begin(), targets.end(), [](ScanTarget const& a, ScanTarget const& b) {
@@ -270,8 +311,13 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
         std::sort(hazards.begin(), hazards.end(), [](ScanTarget const& a, ScanTarget const& b) {
             return a.contactDistance < b.contactDistance;
         });
+        std::sort(orbs.begin(), orbs.end(), [](ScanTarget const& a, ScanTarget const& b) {
+            return a.dx < b.dx;
+        });
 
         ScanTarget const* nearestHazard = hazards.empty() ? nullptr : &hazards.front();
+        ScanTarget const* nearestOrb = orbs.empty() ? nullptr : &orbs.front();
+        if (nearestOrb) g_state.orbTargetId = nearestOrb->object->m_objectID;
 
         float closingPerFrame = 0.f;
         if (nearestHazard && nearestHazard->object == m_fields->previousNearest &&
@@ -322,8 +368,20 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
                 for (auto const& target : targets) {
                     if (rayCount >= 8) break;
                     if (target.dx < 0.f) continue;
-                    const auto lineColor = target.hazard ? red : blue;
-                    draw->drawSegment(playerCenter, target.point, target.hazard ? 1.8f : 0.7f, lineColor);
+                    const auto green = cocos2d::ccColor4F{0.12f, 1.00f, 0.52f, 0.92f};
+                    const auto lineColor = target.hazard ? red : (target.orb ? green : blue);
+                    draw->drawSegment(playerCenter, target.point, (target.hazard || target.orb) ? 1.8f : 0.7f, lineColor);
+                    if (target.orb) {
+                        const float radius = 12.f;
+                        const CCPoint top{target.point.x, target.point.y + radius};
+                        const CCPoint right{target.point.x + radius, target.point.y};
+                        const CCPoint bottom{target.point.x, target.point.y - radius};
+                        const CCPoint left{target.point.x - radius, target.point.y};
+                        draw->drawSegment(top, right, 1.7f, green);
+                        draw->drawSegment(right, bottom, 1.7f, green);
+                        draw->drawSegment(bottom, left, 1.7f, green);
+                        draw->drawSegment(left, top, 1.7f, green);
+                    }
                     if (target.hazard) {
                         draw->drawDot(target.point, 4.f, red);
                         const float halfW = std::clamp(approximateHalfWidth(target.object), 6.f, 26.f);
@@ -348,13 +406,63 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
             }
         }
 
-        // Controller decisions use ETA in update frames, not a fixed pixel-only threshold.
+        // Fast controller: use measured contact distance and per-frame closing speed.
+        // The old fixed 82px lower bound jumped too early; this uses a short lead window.
+        const bool orbAssist = mod->getSettingValue<bool>("orb-assist");
+        bool orbAction = false;
+        const float playerHalfW = approximateHalfWidth(player);
+        const float playerHalfH = std::max(6.f, player->getContentSize().height *
+            std::abs(player->getScaleY()) * 0.5f);
+
+        if (enabled && orbAssist && nearestOrb && m_fields->releaseCooldown <= 0.f) {
+            const float orbHalfW = approximateHalfWidth(nearestOrb->object);
+            const float orbHalfH = std::max(6.f, nearestOrb->object->getContentSize().height *
+                std::abs(nearestOrb->object->getScaleY()) * 0.5f);
+            const float edgeGapX = nearestOrb->dx - playerHalfW - orbHalfW;
+            const float edgeGapY = std::abs(nearestOrb->dy) - playerHalfH - orbHalfH;
+            const float orbLead = std::clamp(closingPerFrame * 1.25f + 2.f, 4.f, 16.f);
+            const bool inOrbContactWindow =
+                edgeGapX <= orbLead && edgeGapX >= -12.f &&
+                edgeGapY <= 10.f && nearestOrb->dx >= -18.f;
+
+            // A high orb often needs an approach jump, followed by a second tap inside
+            // the interaction window. Only launch once per orb, and do it closer than
+            // the old generic spike threshold.
+            const float orbApproachDistance = std::clamp(
+                closingPerFrame * 5.0f + std::max(0.f, nearestOrb->dy) * 0.22f,
+                52.f, 112.f);
+            const bool shouldApproachOrb = pulseControlMode(mode) &&
+                nearestOrb->dy > std::max(28.f, playerHalfH + orbHalfH * 0.45f) &&
+                nearestOrb->contactDistance <= orbApproachDistance &&
+                nearestOrb->contactDistance > orbLead + 12.f &&
+                nearestOrb->dx > 12.f &&
+                nearestOrb->object != m_fields->lastOrbApproach;
+
+            if (inOrbContactWindow && nearestOrb->object != m_fields->lastOrbTriggered) {
+                player->pushButton(PlayerButton::Jump);
+                m_fields->releaseNextFrame = true;
+                m_fields->releaseCooldown = 0.10f;
+                m_fields->lastOrbTriggered = nearestOrb->object;
+                g_state.action = fmt::format("ORB TAP / {}", orbName(nearestOrb->object->m_objectID));
+                orbAction = true;
+            } else if (shouldApproachOrb) {
+                player->pushButton(PlayerButton::Jump);
+                m_fields->releaseNextFrame = true;
+                m_fields->releaseCooldown = 0.16f;
+                m_fields->lastOrbApproach = nearestOrb->object;
+                g_state.action = fmt::format("APPROACH / {}", orbName(nearestOrb->object->m_objectID));
+                orbAction = true;
+            }
+        }
+
         if (enabled && mode == PilotMode::Platformer && !m_fields->rightHeld) {
             player->pushButton(PlayerButton::Right);
             m_fields->rightHeld = true;
         }
 
-        if (!enabled) {
+        if (orbAction) {
+            // The one-frame orb input takes priority over normal mode steering.
+        } else if (!enabled) {
             if (m_fields->jumpHeld) {
                 player->releaseButton(PlayerButton::Jump);
                 m_fields->jumpHeld = false;
@@ -365,16 +473,13 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
             }
         } else if (holdControlMode(mode)) {
             bool wantHold = false;
-            const float steeringWindow = std::max(24.f, static_cast<float>(leadFrames * 3));
+            const float steeringWindow = std::max(8.f, static_cast<float>(leadFrames * 1.8f));
             const bool imminentHazard = nearestHazard && framesToImpact >= 0.f &&
                                          framesToImpact <= steeringWindow;
             if (imminentHazard) {
-                // Use the nearest hazard's vertical lane only when it is approaching;
-                // distant hazards should not cause the ship/wave to climb too early.
                 wantHold = nearestHazard->dy < -8.f;
                 g_state.action = wantHold ? "HOLD / CLIMB" : "RELEASE / DESCEND";
             } else {
-                // In an open corridor, keep ship/wave near the midline instead of free-falling.
                 const float midline = CCDirector::sharedDirector()->getWinSize().height * 0.52f;
                 wantHold = playerCenter.y < midline - 18.f;
                 g_state.action = wantHold ? "HOLD / CENTER" : "RELEASE / CENTER";
@@ -385,30 +490,25 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
                 else player->releaseButton(PlayerButton::Jump);
                 m_fields->jumpHeld = wantHold;
             }
-        } else if (nearestHazard && pulseControlMode(mode) &&
-                   m_fields->releaseCooldown <= 0.f) {
-            // ETA-only gating can deadlock when the game's velocity API reports a low
-            // value during scroll/portal transitions. Keep a speed-scaled lead distance,
-            // but enforce a minimum collision window so a visible spike still triggers.
+        } else if (nearestHazard && pulseControlMode(mode) && m_fields->releaseCooldown <= 0.f) {
             const float speedLeadDistance = closingPerFrame * static_cast<float>(leadFrames);
-            const float triggerDistance = std::clamp(
-                std::max(82.f, speedLeadDistance), 82.f, 190.f);
+            const float triggerDistance = std::clamp(speedLeadDistance + 7.f, 24.f, 68.f);
             const bool inTimingWindow =
                 (framesToImpact >= 0.f && framesToImpact <= static_cast<float>(leadFrames)) ||
                 nearestHazard->contactDistance <= triggerDistance;
 
             if (!inTimingWindow) {
-                g_state.action = fmt::format("TRACK / ETA {} / NEED {:.0f}", etaText(framesToImpact), triggerDistance);
+                g_state.action = fmt::format("TRACK / ETA {} / TRIG {:.0f}", etaText(framesToImpact), triggerDistance);
             } else {
                 const bool sameHazard = nearestHazard->object == m_fields->lastTriggeredHazard;
-            if (!sameHazard) {
-                player->pushButton(PlayerButton::Jump);
-                m_fields->releaseNextFrame = true;
-                m_fields->releaseCooldown = 0.08f;
-                m_fields->lastTriggeredHazard = nearestHazard->object;
-                m_fields->lastTriggeredX = nearestHazard->point.x;
-                m_fields->lastTriggeredId = nearestHazard->object->m_objectID;
-                g_state.action = fmt::format("JUMP / {}F LEAD", leadFrames);
+                if (!sameHazard) {
+                    player->pushButton(PlayerButton::Jump);
+                    m_fields->releaseNextFrame = true;
+                    m_fields->releaseCooldown = 0.09f;
+                    m_fields->lastTriggeredHazard = nearestHazard->object;
+                    m_fields->lastTriggeredX = nearestHazard->point.x;
+                    m_fields->lastTriggeredId = nearestHazard->object->m_objectID;
+                    g_state.action = fmt::format("JUMP / {}F WINDOW", leadFrames);
                 } else {
                     g_state.action = "TARGET ALREADY TRIGGERED";
                 }
@@ -418,6 +518,8 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
                 g_state.action = nearestHazard
                     ? fmt::format("MOVE RIGHT / ETA {}", etaText(framesToImpact))
                     : "MOVE RIGHT / SEARCH";
+            } else if (nearestOrb) {
+                g_state.action = fmt::format("TRACK ORB / {}", orbName(nearestOrb->object->m_objectID));
             } else {
                 g_state.action = nearestHazard ? fmt::format("TRACK / ETA {}", etaText(framesToImpact)) : "SEARCHING";
             }
@@ -431,6 +533,16 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
                    nearestHazard->dx < -40.f) {
             m_fields->lastTriggeredHazard = nullptr;
         }
+        if (m_fields->lastOrbTriggered && !nearestOrb) m_fields->lastOrbTriggered = nullptr;
+        if (m_fields->lastOrbApproach && !nearestOrb) m_fields->lastOrbApproach = nullptr;
+        if (m_fields->lastOrbTriggered && nearestOrb &&
+            nearestOrb->object != m_fields->lastOrbTriggered && nearestOrb->dx < -36.f) {
+            m_fields->lastOrbTriggered = nullptr;
+        }
+        if (m_fields->lastOrbApproach && nearestOrb &&
+            nearestOrb->object != m_fields->lastOrbApproach && nearestOrb->dx < -36.f) {
+            m_fields->lastOrbApproach = nullptr;
+        }
 
         g_state.action = g_state.action.empty() ? "IDLE" : g_state.action;
 
@@ -439,13 +551,14 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
             if (hudEnabled) {
                 const std::string hud = fmt::format(
                     "GEOPILOT  {}  |  AUTO {}\nFRAME {}  FPS {:.0f}  DT {:.4f}s\n"
-                    "SCAN {} objects / {} hazards  |  LEAD {}f\n"
-                    "TARGET {}  DIST {:.1f}  ETA {}  |  {}",
+                    "SCAN {} objects / {} hazards / {} orbs  |  LEAD {}f\n"
+                    "TARGET {}  DIST {:.1f}  ETA {}  ORB {}  |  {}",
                     g_state.mode, enabled ? "ON" : "OFF",
                     g_state.frame, g_state.fps, g_state.dt,
-                    g_state.scannedObjects, g_state.knownHazards, leadFrames,
+                    g_state.scannedObjects, g_state.knownHazards, g_state.recognizedOrbs, leadFrames,
                     g_state.targetId < 0 ? "--" : std::to_string(g_state.targetId),
-                    g_state.distance, etaText(g_state.framesToImpact), g_state.action
+                    g_state.distance, etaText(g_state.framesToImpact),
+                    g_state.orbTargetId < 0 ? "--" : std::string(orbName(g_state.orbTargetId)), g_state.action
                 );
                 m_fields->hudLabel->setString(hud.c_str());
             }
@@ -468,117 +581,193 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
     }
 };
 
-class $modify(GeoPilotPauseLayer, PauseLayer) {
-    struct Fields {
-        ButtonSprite* autoSprite = nullptr;
-        ButtonSprite* raysSprite = nullptr;
-        ButtonSprite* hudSprite = nullptr;
-        ButtonSprite* leadSprite = nullptr;
-        CCLabelBMFont* statusLabel = nullptr;
-    };
+class GeoPilotSettingsPopup : public geode::Popup<> {
+protected:
+    ButtonSprite* m_autoSprite = nullptr;
+    ButtonSprite* m_orbSprite = nullptr;
+    ButtonSprite* m_raysSprite = nullptr;
+    ButtonSprite* m_hudSprite = nullptr;
+    ButtonSprite* m_modeSprite = nullptr;
+    ButtonSprite* m_leadSprite = nullptr;
+    ButtonSprite* m_rangeSprite = nullptr;
+    CCLabelBMFont* m_statusLabel = nullptr;
 
-    void customSetup() {
-        PauseLayer::customSetup();
+    bool setup() override {
+        setTitle("GeoPilot Control Center");
 
-        auto mod = Mod::get();
-        const auto win = CCDirector::sharedDirector()->getWinSize();
         auto menu = CCMenu::create();
-        menu->setPosition({win.width - 112.f, win.height - 48.f});
-        menu->setID("geopilot-pause-controls");
+        menu->setPosition(CCPointZero);
+        m_mainLayer->addChild(menu, 10);
 
-        auto makeButton = [&](const char* text, const char* bg, SEL_MenuHandler callback) {
-            auto sprite = ButtonSprite::create(text, "bigFont.fnt", bg, 0.6f);
-            if (!sprite) return static_cast<CCMenuItemSpriteExtra*>(nullptr);
+        auto addButton = [&](const char* text, CCPoint pos, SEL_MenuHandler selector) -> ButtonSprite* {
+            auto sprite = ButtonSprite::create(text, "bigFont.fnt", "GJ_button_04.png", 0.70f);
+            if (!sprite) return nullptr;
             sprite->setScale(0.50f);
-            auto button = CCMenuItemSpriteExtra::create(sprite, this, callback);
-            return button;
+            auto item = CCMenuItemSpriteExtra::create(sprite, this, selector);
+            item->setPosition(pos);
+            menu->addChild(item);
+            return sprite;
         };
 
-        m_fields->autoSprite = ButtonSprite::create(
-            mod->getSettingValue<bool>("auto-play") ? "AUTO PLAY: ON" : "AUTO PLAY: OFF",
-            "bigFont.fnt", mod->getSettingValue<bool>("auto-play") ? "GJ_button_03.png" : "GJ_button_01.png", 0.6f);
-        m_fields->autoSprite->setScale(0.50f);
-        auto autoButton = CCMenuItemSpriteExtra::create(
-            m_fields->autoSprite, this, menu_selector(GeoPilotPauseLayer::onToggleAuto));
-        autoButton->setPosition({0.f, 0.f});
-        menu->addChild(autoButton);
-
-        m_fields->raysSprite = ButtonSprite::create(
-            mod->getSettingValue<bool>("show-rays") ? "SCAN RAYS: ON" : "SCAN RAYS: OFF",
-            "bigFont.fnt", mod->getSettingValue<bool>("show-rays") ? "GJ_button_03.png" : "GJ_button_01.png", 0.6f);
-        m_fields->raysSprite->setScale(0.50f);
-        auto raysButton = CCMenuItemSpriteExtra::create(
-            m_fields->raysSprite, this, menu_selector(GeoPilotPauseLayer::onToggleRays));
-        raysButton->setPosition({0.f, -34.f});
-        menu->addChild(raysButton);
-
-        m_fields->hudSprite = ButtonSprite::create(
-            mod->getSettingValue<bool>("show-hud") ? "HUD: ON" : "HUD: OFF",
-            "bigFont.fnt", mod->getSettingValue<bool>("show-hud") ? "GJ_button_03.png" : "GJ_button_01.png", 0.6f);
-        m_fields->hudSprite->setScale(0.50f);
-        auto hudButton = CCMenuItemSpriteExtra::create(
-            m_fields->hudSprite, this, menu_selector(GeoPilotPauseLayer::onToggleHud));
-        hudButton->setPosition({0.f, -68.f});
-        menu->addChild(hudButton);
-
-        const int lead = static_cast<int>(mod->getSettingValue<int64_t>("lead-frames"));
-        m_fields->leadSprite = ButtonSprite::create(
-            fmt::format("JUMP LEAD: {}F", lead).c_str(), "bigFont.fnt", "GJ_button_02.png", 0.6f);
-        m_fields->leadSprite->setScale(0.50f);
-        auto leadButton = CCMenuItemSpriteExtra::create(
-            m_fields->leadSprite, this, menu_selector(GeoPilotPauseLayer::onCycleLead));
-        leadButton->setPosition({0.f, -102.f});
-        menu->addChild(leadButton);
-
-        this->addChild(menu, 10);
-
-        const auto status = fmt::format(
-            "MODE: {}\nFRAME: {}  FPS: {:.0f}\nDT: {:.4f}s  SPEED: {:.2f}px/f\n"
-            "TARGET ID: {}\nDIST: {:.1f}  ETA: {}\nSCAN: {} objects / {} hazards\nACTION: {}",
-            g_state.mode, g_state.frame, g_state.fps, g_state.dt, g_state.closingRate,
-            g_state.targetId < 0 ? "--" : std::to_string(g_state.targetId),
-            g_state.distance, etaText(g_state.framesToImpact),
-            g_state.scannedObjects, g_state.knownHazards, g_state.action
-        );
-        m_fields->statusLabel = CCLabelBMFont::create(status.c_str(), "chatFont.fnt");
-        if (m_fields->statusLabel) {
-            m_fields->statusLabel->setAnchorPoint({1.f, 1.f});
-            m_fields->statusLabel->setPosition({win.width - 16.f, win.height - 196.f});
-            m_fields->statusLabel->setScale(0.58f);
-            m_fields->statusLabel->setColor({160, 230, 255});
-            this->addChild(m_fields->statusLabel, 10);
+        const auto logoPath = Mod::get()->getResourcesDir() / "geopilot-logo.png";
+        auto logo = CCSprite::create(logoPath.string().c_str());
+        if (logo) {
+            logo->setScale(0.44f);
+            logo->setPosition({34.f, 215.f});
+            m_mainLayer->addChild(logo, 8);
         }
+
+        auto subtitle = CCLabelBMFont::create("SCAN  /  PREDICT  /  ACT", "chatFont.fnt");
+        if (subtitle) {
+            subtitle->setScale(0.53f);
+            subtitle->setAnchorPoint({0.f, 0.5f});
+            subtitle->setPosition({59.f, 213.f});
+            subtitle->setColor({100, 220, 255});
+            m_mainLayer->addChild(subtitle, 8);
+        }
+
+        m_autoSprite = addButton("", {91.f, 170.f}, menu_selector(GeoPilotSettingsPopup::onToggleAuto));
+        m_orbSprite = addButton("", {263.f, 170.f}, menu_selector(GeoPilotSettingsPopup::onToggleOrbs));
+        m_raysSprite = addButton("", {91.f, 135.f}, menu_selector(GeoPilotSettingsPopup::onToggleRays));
+        m_hudSprite = addButton("", {263.f, 135.f}, menu_selector(GeoPilotSettingsPopup::onToggleHud));
+        m_modeSprite = addButton("", {91.f, 100.f}, menu_selector(GeoPilotSettingsPopup::onCycleMode));
+        m_leadSprite = addButton("", {263.f, 100.f}, menu_selector(GeoPilotSettingsPopup::onCycleLead));
+        m_rangeSprite = addButton("", {180.f, 65.f}, menu_selector(GeoPilotSettingsPopup::onCycleRange));
+
+        m_statusLabel = CCLabelBMFont::create("", "chatFont.fnt");
+        if (m_statusLabel) {
+            m_statusLabel->setScale(0.43f);
+            m_statusLabel->setPosition({180.f, 28.f});
+            m_statusLabel->setColor({150, 225, 255});
+            m_mainLayer->addChild(m_statusLabel, 8);
+        }
+
+        refreshLabels();
+        return true;
+    }
+
+    void refreshLabels() {
+        auto mod = Mod::get();
+        if (m_autoSprite) m_autoSprite->setString(mod->getSettingValue<bool>("auto-play") ? "AUTO PLAY: ON" : "AUTO PLAY: OFF");
+        if (m_orbSprite) m_orbSprite->setString(mod->getSettingValue<bool>("orb-assist") ? "ORB ASSIST: ON" : "ORB ASSIST: OFF");
+        if (m_raysSprite) m_raysSprite->setString(mod->getSettingValue<bool>("show-rays") ? "SCAN RAYS: ON" : "SCAN RAYS: OFF");
+        if (m_hudSprite) m_hudSprite->setString(mod->getSettingValue<bool>("show-hud") ? "HUD: ON" : "HUD: OFF");
+        if (m_modeSprite) m_modeSprite->setString(fmt::format("MODE: {}", mod->getSettingValue<std::string>("control-mode")).c_str());
+        if (m_leadSprite) m_leadSprite->setString(fmt::format("LEAD: {}F", mod->getSettingValue<int64_t>("lead-frames")).c_str());
+        if (m_rangeSprite) m_rangeSprite->setString(fmt::format("SCAN RANGE: {}", mod->getSettingValue<int64_t>("reaction-distance")).c_str());
+
+        if (m_statusLabel) {
+            const std::string status = fmt::format(
+                "MODE {}   FRAME {}   FPS {:.0f}\nSCAN {} objects / {} hazards / {} orbs\n"
+                "HAZARD {}  ETA {}  ORB {}  ACTION {}",
+                g_state.mode, g_state.frame, g_state.fps,
+                g_state.scannedObjects, g_state.knownHazards, g_state.recognizedOrbs,
+                g_state.targetId < 0 ? "--" : std::to_string(g_state.targetId),
+                etaText(g_state.framesToImpact),
+                g_state.orbTargetId < 0 ? "--" : std::string(orbName(g_state.orbTargetId)),
+                g_state.action
+            );
+            m_statusLabel->setString(status.c_str());
+        }
+    }
+
+public:
+    static GeoPilotSettingsPopup* create() {
+        auto ret = new GeoPilotSettingsPopup();
+        if (ret->initAnchored(360.f, 260.f, "square01_001.png", CCRectZero)) {
+            ret->autorelease();
+            return ret;
+        }
+        delete ret;
+        return nullptr;
     }
 
     void onToggleAuto(CCObject*) {
         auto mod = Mod::get();
-        const bool next = !mod->getSettingValue<bool>("auto-play");
-        mod->setSettingValue<bool>("auto-play", next);
-        if (m_fields->autoSprite) m_fields->autoSprite->setString(next ? "AUTO PLAY: ON" : "AUTO PLAY: OFF");
-        geode::Notification::create(next ? "GeoPilot Auto Play ON" : "GeoPilot Auto Play OFF",
-            next ? geode::NotificationIcon::Success : geode::NotificationIcon::Warning, 1.5f)->show();
+        mod->setSettingValue<bool>("auto-play", !mod->getSettingValue<bool>("auto-play"));
+        refreshLabels();
     }
-
+    void onToggleOrbs(CCObject*) {
+        auto mod = Mod::get();
+        mod->setSettingValue<bool>("orb-assist", !mod->getSettingValue<bool>("orb-assist"));
+        refreshLabels();
+    }
     void onToggleRays(CCObject*) {
         auto mod = Mod::get();
-        const bool next = !mod->getSettingValue<bool>("show-rays");
-        mod->setSettingValue<bool>("show-rays", next);
-        if (m_fields->raysSprite) m_fields->raysSprite->setString(next ? "SCAN RAYS: ON" : "SCAN RAYS: OFF");
+        mod->setSettingValue<bool>("show-rays", !mod->getSettingValue<bool>("show-rays"));
+        refreshLabels();
     }
-
     void onToggleHud(CCObject*) {
         auto mod = Mod::get();
-        const bool next = !mod->getSettingValue<bool>("show-hud");
-        mod->setSettingValue<bool>("show-hud", next);
-        if (m_fields->hudSprite) m_fields->hudSprite->setString(next ? "HUD: ON" : "HUD: OFF");
+        mod->setSettingValue<bool>("show-hud", !mod->getSettingValue<bool>("show-hud"));
+        refreshLabels();
     }
-
+    void onCycleMode(CCObject*) {
+        auto mod = Mod::get();
+        const std::vector<std::string> modes = {
+            "Auto", "Cube", "Ship", "Ball", "UFO", "Wave", "Robot", "Spider", "Swing", "Platformer"
+        };
+        auto current = mod->getSettingValue<std::string>("control-mode");
+        auto it = std::find(modes.begin(), modes.end(), current);
+        const auto index = it == modes.end() ? size_t{0} :
+            (static_cast<size_t>(std::distance(modes.begin(), it)) + 1) % modes.size();
+        mod->setSettingValue<std::string>("control-mode", modes[index]);
+        refreshLabels();
+    }
     void onCycleLead(CCObject*) {
         auto mod = Mod::get();
-        int lead = static_cast<int>(mod->getSettingValue<int64_t>("lead-frames"));
-        lead += 2;
-        if (lead > 24) lead = 4;
+        auto lead = mod->getSettingValue<int64_t>("lead-frames") + 1;
+        if (lead > 10) lead = 2;
         mod->setSettingValue<int64_t>("lead-frames", lead);
-        if (m_fields->leadSprite) m_fields->leadSprite->setString(fmt::format("JUMP LEAD: {}F", lead).c_str());
+        refreshLabels();
+    }
+    void onCycleRange(CCObject*) {
+        auto mod = Mod::get();
+        auto range = mod->getSettingValue<int64_t>("reaction-distance") + 50;
+        if (range > 650) range = 250;
+        mod->setSettingValue<int64_t>("reaction-distance", range);
+        refreshLabels();
+    }
+};
+
+class $modify(GeoPilotPauseLayer, PauseLayer) {
+    void customSetup() {
+        PauseLayer::customSetup();
+
+        const auto win = CCDirector::sharedDirector()->getWinSize();
+        const auto logoPath = Mod::get()->getResourcesDir() / "geopilot-logo.png";
+        auto logo = CCSprite::create(logoPath.string().c_str());
+        if (!logo) {
+            auto fallback = ButtonSprite::create("GEOPILOT", "bigFont.fnt", "GJ_button_04.png", 0.7f);
+            fallback->setScale(0.50f);
+            auto item = CCMenuItemSpriteExtra::create(
+                fallback, this, menu_selector(GeoPilotPauseLayer::onOpenSettings));
+            auto menu = CCMenu::create();
+            menu->setPosition({win.width - 48.f, win.height - 40.f});
+            menu->addChild(item);
+            this->addChild(menu, 10);
+            return;
+        }
+
+        logo->setScale(0.48f);
+        auto item = CCMenuItemSpriteExtra::create(
+            logo, this, menu_selector(GeoPilotPauseLayer::onOpenSettings));
+        item->setID("geopilot-settings-button");
+        auto menu = CCMenu::create();
+        menu->setPosition({win.width - 36.f, win.height - 36.f});
+        menu->addChild(item);
+        this->addChild(menu, 10);
+
+        auto label = CCLabelBMFont::create("GEOPILOT", "chatFont.fnt");
+        if (label) {
+            label->setScale(0.46f);
+            label->setPosition({win.width - 36.f, win.height - 61.f});
+            label->setColor({100, 220, 255});
+            this->addChild(label, 10);
+        }
+    }
+
+    void onOpenSettings(CCObject*) {
+        if (auto popup = GeoPilotSettingsPopup::create()) popup->show();
     }
 };

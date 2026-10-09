@@ -8,9 +8,9 @@
   },
   "id": "noob.geopilot",
   "name": "GeoPilot Auto Play",
-  "version": "v0.2.2",
+  "version": "v0.3.0",
   "developer": "Noob",
-  "description": "Auto-detecting Geometry Dash controller with scanner rays, frame ETA, HUD and pause-menu controls.",
+  "description": "Auto mode detection, spike timing, orb assist, scan rays and compact pause-menu control center.",
   "repository": "https://github.com/locquach700-del/script/tree/geopilot-build/GeoPilot",
   "settings": {
     "controller-title": {
@@ -21,7 +21,7 @@
     "auto-play": {
       "type": "bool",
       "name": "Enable Auto Play",
-      "description": "Automatically react to recognized spikes and saws.",
+      "description": "Automatically react to recognized lethal obstacles.",
       "default": false
     },
     "control-mode": {
@@ -29,7 +29,18 @@
       "name": "Game Mode",
       "description": "Auto detects the current player mode. Manual values override detection.",
       "default": "Auto",
-      "one-of": ["Auto", "Cube", "Ship", "Ball", "UFO", "Wave", "Robot", "Spider", "Swing", "Platformer"]
+      "one-of": [
+        "Auto",
+        "Cube",
+        "Ship",
+        "Ball",
+        "UFO",
+        "Wave",
+        "Robot",
+        "Spider",
+        "Swing",
+        "Platformer"
+      ]
     },
     "reaction-distance": {
       "type": "int",
@@ -48,13 +59,13 @@
       "type": "int",
       "name": "Jump Lead (Frames)",
       "description": "How many measured update frames before contact the bot should act.",
-      "default": 10,
-      "min": 4,
-      "max": 24,
+      "default": 4,
+      "min": 2,
+      "max": 10,
       "control": {
         "slider": true,
         "input": true,
-        "slider-step": 2
+        "slider-step": 1
       }
     },
     "show-rays": {
@@ -74,6 +85,12 @@
       "name": "Debug Log",
       "description": "Log controller decisions to the Geode log once per second.",
       "default": false
+    },
+    "orb-assist": {
+      "type": "bool",
+      "name": "Orb Assist",
+      "description": "Predict approaching yellow, green, pink, blue, red, black and special jump orbs.",
+      "default": true
     }
   }
 }
