@@ -1,0 +1,59 @@
+name: Build GeoPilot (Geode 5.10.1)
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - geopilot-build
+    paths:
+      - "GeoPilot/**"
+      - ".github/workflows/geopilot-build.yml"
+
+jobs:
+  build:
+    name: Build ${{ matrix.config.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - name: Windows x64
+            os: windows-latest
+            target: Win64
+          - name: macOS
+            os: macos-latest
+            target: MacOS
+          - name: iOS
+            os: macos-latest
+            target: iOS
+          - name: Android 32-bit
+            os: ubuntu-latest
+            target: Android32
+          - name: Android 64-bit
+            os: ubuntu-latest
+            target: Android64
+    runs-on: ${{ matrix.config.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: geopilot-build
+      - name: Build mod
+        uses: geode-sdk/build-geode-mod@main
+        with:
+          path: ./GeoPilot
+          sdk: v5.10.1
+          target: ${{ matrix.config.target }}
+          combine: true
+
+  package:
+    name: Combine platform builds
+    runs-on: ubuntu-latest
+    needs: [build]
+    steps:
+      - uses: geode-sdk/build-geode-mod/combine@main
+        id: combine
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GeoPilot-Geode-v5.10.1-GD-2.2081
+          path: ${{ steps.combine.outputs.build-output }}
+          if-no-files-found: error
+          retention-days: 30
