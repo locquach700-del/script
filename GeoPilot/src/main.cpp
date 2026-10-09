@@ -159,6 +159,7 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
         float releaseCooldown = 0.f;
         bool releaseNextFrame = false;
         bool jumpHeld = false;
+        bool rightHeld = false;
         float logTimer = 0.f;
     };
 
@@ -348,15 +349,28 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
         }
 
         // Controller decisions use ETA in update frames, not a fixed pixel-only threshold.
+        if (enabled && mode == PilotMode::Platformer && !m_fields->rightHeld) {
+            player->pushButton(PlayerButton::Right);
+            m_fields->rightHeld = true;
+        }
+
         if (!enabled) {
             if (m_fields->jumpHeld) {
                 player->releaseButton(PlayerButton::Jump);
                 m_fields->jumpHeld = false;
             }
+            if (m_fields->rightHeld) {
+                player->releaseButton(PlayerButton::Right);
+                m_fields->rightHeld = false;
+            }
         } else if (holdControlMode(mode)) {
             bool wantHold = false;
-            if (nearestHazard && nearestHazard->dx <= scanDistance) {
-                // A hazard below the player calls for upward steering; one above calls for down.
+            const float steeringWindow = std::max(24.f, static_cast<float>(leadFrames * 3));
+            const bool imminentHazard = nearestHazard && framesToImpact >= 0.f &&
+                                         framesToImpact <= steeringWindow;
+            if (imminentHazard) {
+                // Use the nearest hazard's vertical lane only when it is approaching;
+                // distant hazards should not cause the ship/wave to climb too early.
                 wantHold = nearestHazard->dy < -8.f;
                 g_state.action = wantHold ? "HOLD / CLIMB" : "RELEASE / DESCEND";
             } else {
@@ -387,7 +401,13 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
                 g_state.action = "TARGET ALREADY TRIGGERED";
             }
         } else if (enabled) {
-            g_state.action = nearestHazard ? fmt::format("TRACK / ETA {}", etaText(framesToImpact)) : "SEARCHING";
+            if (mode == PilotMode::Platformer) {
+                g_state.action = nearestHazard
+                    ? fmt::format("MOVE RIGHT / ETA {}", etaText(framesToImpact))
+                    : "MOVE RIGHT / SEARCH";
+            } else {
+                g_state.action = nearestHazard ? fmt::format("TRACK / ETA {}", etaText(framesToImpact)) : "SEARCHING";
+            }
         }
 
         // Forget a target after passing it so a retry or a loop does not permanently lock it out.
