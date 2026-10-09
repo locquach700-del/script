@@ -649,7 +649,7 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
                     draw->drawDot(playerCenter, 4.f, cyan);
                 }
                 if (nearestOrb) {
-                    draw->drawSegment(playerCenter, nearestOrb->point, 1.8f, green);
+                    draw->drawSegment(playerCenter, nearestOrb->point, 1.8f, cocos2d::ccColor4F{0.12f, 1.00f, 0.52f, 0.92f});
                 }
                 if (nearestSafeSurface) {
                     draw->drawSegment(playerCenter, nearestSafeSurface->point, 1.4f,

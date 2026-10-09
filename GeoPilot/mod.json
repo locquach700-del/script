@@ -8,9 +8,9 @@
   },
   "id": "noob.geopilot",
   "name": "GeoPilot Auto Play",
-  "version": "v0.4.0",
+  "version": "v0.4.1",
   "developer": "Noob",
-  "description": "Preflight route analysis, red hazard / cyan safe-surface classification, orb prediction, scan rays and pause control center.",
+  "description": "Preflight map analysis, red hazard / cyan safe-surface classification, orb prediction, scan rays and pause control center.",
   "repository": "https://github.com/locquach700-del/script/tree/geopilot-build/GeoPilot",
   "settings": {
     "controller-title": {

@@ -1,4 +1,4 @@
-# GeoPilot Auto Play v0.4.0 — Geometry Dash 2.2081 / Geode 5.10.1
+# GeoPilot Auto Play v0.4.1 — Geometry Dash 2.2081 / Geode 5.10.1
 
 ## Included
 - Bundled GeoPilot icon, shown as the single button inside Pause. Click it to open Control Center.
