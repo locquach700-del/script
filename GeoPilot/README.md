@@ -1,4 +1,4 @@
-# GeoPilot Auto Play v0.4.4 — Geometry Dash 2.2081 / Geode 5.10.1
+# GeoPilot Auto Play v0.4.5 — Geometry Dash 2.2081 / Geode 5.10.1
 
 ## Included
 - Bundled GeoPilot icon, shown as the single button inside Pause. Click it to open Control Center.
@@ -53,3 +53,8 @@ Use Practice Mode when first testing a level. Custom hitboxes, unusual spike IDs
 - Cube continues to react only to known spike IDs that are in front and in its standing vertical lane; a red object above the Cube does not trigger a jump.
 - Tracks the last failure's target ID and horizontal distance per level. After three consecutive deaths at a matching target and distance, Auto Play safely switches itself off to stop an endless same-failure loop; the UI shows the learned death streak.
 - Keeps the v0.4.3 Drop/Black Orb, contact Dash Ring, Gravity Dash Ring and speed-portal catalog.
+
+
+## v0.4.5 — variable Robot jump input
+- Robot jumps now hold the input briefly when the predicted obstacle/platform is tall, instead of being forced into a one-frame tap every time. Orb activations remain taps; an elevated-orb approach can use a controlled short hold.
+- Hold duration is capped and is still a heuristic, so difficult Robot timings should be tested in Practice Mode.

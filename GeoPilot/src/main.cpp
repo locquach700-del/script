@@ -388,6 +388,15 @@ namespace {
         return fmt::format("learning/local-{}", std::hash<std::string>{}(level->m_levelName));
     }
 
+    int robotExtraHoldForHeight(PilotMode mode, float obstacleHeight, float playerHeight) {
+        if (mode != PilotMode::Robot) return 0;
+        const float ratio = obstacleHeight / std::max(1.f, playerHeight);
+        if (ratio >= 1.9f) return 3;
+        if (ratio >= 1.4f) return 2;
+        if (ratio >= 1.1f) return 1;
+        return 0;
+    }
+
     CCSprite* createGeoPilotLogo() {
         const auto base = Mod::get()->getResourcesDir();
         const std::filesystem::path candidates[] = {
@@ -432,6 +441,7 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
         float releaseCooldown = 0.f;
         bool releaseNextFrame = false;
         bool jumpHeld = false;
+        int jumpHoldFramesRemaining = 0;
         bool rightHeld = false;
         float logTimer = 0.f;
         bool deathRecordedThisRun = false;
@@ -566,9 +576,14 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
         const bool hudEnabled = mod->getSettingValue<bool>("show-hud");
 
         if (m_fields->releaseNextFrame && player) {
-            player->releaseButton(PlayerButton::Jump);
-            m_fields->releaseNextFrame = false;
-            m_fields->jumpHeld = false;
+            if (!player->m_isDead && m_fields->jumpHoldFramesRemaining > 0) {
+                --m_fields->jumpHoldFramesRemaining;
+            } else {
+                player->releaseButton(PlayerButton::Jump);
+                m_fields->releaseNextFrame = false;
+                m_fields->jumpHeld = false;
+                m_fields->jumpHoldFramesRemaining = 0;
+            }
         }
 
         if (player && !player->m_isDead) m_fields->deathRecordedThisRun = false;
@@ -881,6 +896,7 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
                 }
             } else if (inOrbContactWindow && nearestOrb->object != m_fields->lastOrbTriggered) {
                 player->pushButton(PlayerButton::Jump);
+                m_fields->jumpHoldFramesRemaining = 0; // precise orb activation is a tap
                 m_fields->releaseNextFrame = true;
                 m_fields->releaseCooldown = 0.095f;
                 m_fields->lastOrbTriggered = nearestOrb->object;
@@ -888,6 +904,8 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
                 orbAction = true;
             } else if (shouldApproachOrb) {
                 player->pushButton(PlayerButton::Jump);
+                m_fields->jumpHoldFramesRemaining = mode == PilotMode::Robot
+                    ? (nearestOrb->dy > playerHalfH * 1.8f ? 2 : 0) : 0;
                 m_fields->releaseNextFrame = true;
                 m_fields->releaseCooldown = 0.15f;
                 m_fields->lastOrbApproach = nearestOrb->object;
@@ -961,9 +979,11 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
         if (orbAction) {
             // Keep the orb input for this frame; don't override it with another mode.
         } else if (!enabled) {
-            if (m_fields->jumpHeld) {
+            if (m_fields->jumpHeld || m_fields->releaseNextFrame) {
                 player->releaseButton(PlayerButton::Jump);
                 m_fields->jumpHeld = false;
+                m_fields->releaseNextFrame = false;
+                m_fields->jumpHoldFramesRemaining = 0;
             }
             if (m_fields->rightHeld) {
                 player->releaseButton(PlayerButton::Right);
@@ -994,6 +1014,10 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
                    (!nearestHazard || stepSurfaceTarget->contactDistance <= nearestHazard->contactDistance + 8.f) &&
                    m_fields->releaseCooldown <= 0.f) {
             player->pushButton(PlayerButton::Jump);
+            const float robotPlayerHeight = player->getContentSize().height *
+                std::abs(player->getScaleY());
+            m_fields->jumpHoldFramesRemaining = robotExtraHoldForHeight(
+                mode, selectedStepHeight, robotPlayerHeight);
             m_fields->releaseNextFrame = true;
             m_fields->releaseCooldown = 0.095f;
             m_fields->lastSafePlatform = stepSurfaceTarget->object;
@@ -1023,6 +1047,10 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
                 const bool sameHazard = nearestHazard->object == m_fields->lastTriggeredHazard;
                 if (!sameHazard) {
                     player->pushButton(PlayerButton::Jump);
+                    const float spikeHeight = nearestHazard->object->getContentSize().height *
+                        std::abs(nearestHazard->object->getScaleY());
+                    m_fields->jumpHoldFramesRemaining = robotExtraHoldForHeight(
+                        mode, spikeHeight, player->getContentSize().height * std::abs(player->getScaleY()));
                     m_fields->releaseNextFrame = true;
                     m_fields->releaseCooldown = 0.09f;
                     m_fields->lastTriggeredHazard = nearestHazard->object;
