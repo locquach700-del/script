@@ -8,9 +8,9 @@
   },
   "id": "noob.geopilot",
   "name": "GeoPilot Auto Play",
-  "version": "v0.4.7",
+  "version": "v0.4.8",
   "developer": "Noob",
-  "description": "Faster dense-level scanning, safer Cube/Robot input, repeat-death learning, and expanded orb, portal, trigger and collectible inventory.",
+  "description": "Bounded dense-level scans, spike-only grounded Cube jumps, repeat-death learning, and bundled GeoPilot icon.",
   "repository": "https://github.com/locquach700-del/script/tree/geopilot-build/GeoPilot",
   "settings": {
     "controller-title": {

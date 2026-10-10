@@ -1,13 +1,13 @@
-# GeoPilot Auto Play v0.4.7 — Geometry Dash 2.2081 / Geode 5.10.1
+# GeoPilot Auto Play v0.4.8 — Geometry Dash 2.2081 / Geode 5.10.1
 
 ## Included
-- Bundled GeoPilot icon, shown as the single button inside Pause. Click it to open Control Center.
+- Root-level `logo.png` is included for Geode's mod-list icon; `resources/geopilot-logo.png` powers the Pause shortcut and Control Center.
 - Whole-level preflight inventory from the loaded object array: hazards, cyan safe surfaces, jump orbs, mode portals and pads. The bot builds this inventory during PlayLayer initialization, before its first Auto Play decision.
 - Live route signal with the next three events: DODGE RED, LAND BLUE, TAP YELLOW/GREEN/..., MODE PORTAL, or AUTO PAD.
 - Collision classification uses Geometry Dash GameObjectType::Hazard and AnimatedHazard plus known spike/saw IDs. Solid, slope and breakable surface types are shown separately in cyan.
 - Jump-activated orbs are recognized by both common object IDs and GameObjectType (yellow, blue/gravity, pink, green, red, custom, spider and teleport). Dash rings are treated as contact-triggered, not as an orb jump.
-- Cube-like modes may time a jump onto a reachable cyan solid block if the block top is above the player's feet and no red hazard overlaps the landing area.
-- Short, speed-adaptive red-hazard lead window. The previous large fixed minimum distance is removed to reduce premature jumps.
+- Cube jumps only for recognized spikes ahead in its standing lane, while grounded. Cyan blocks are visualized but never trigger Cube jumps; hazards overhead are ignored.
+- Spawn guard releases stale input and pauses new decisions briefly after respawn; dense scans reuse bounded candidate lists instead of sorting every block every frame.
 - Live HUD and control popup expose map counts, progress, target, ETA, frame/FPS, action, mode, scan range and jump lead.
 
 ## How to use
@@ -71,3 +71,13 @@ Use Practice Mode when first testing a level. Custom hitboxes, unusual spike IDs
 - Selects the closest hazard/orb/surface with linear minimum searches rather than sorting all candidates.
 - Adds a forward route cursor to avoid rescanning passed events from the beginning of the entire level every frame.
 - Chooses the nearest eligible cyan step surface explicitly, so removing surface sorting does not change target selection.
+
+
+## v0.4.8 — dense scenes, Cube gating, icon and UI fixes
+- Reuses scan vectors and caps actionable hazard, orb, step and visual candidates so dense object fields cannot grow per-frame scan arrays without bound.
+- Cube no longer jumps at cyan blocks or arbitrary hazards: only known spike IDs in the standing lane may trigger, and the player must be grounded. A spike above the head is ignored.
+- After a death, releases held buttons and observes a short spawn grace period to avoid instant jump/respawn loops.
+- Captures the actual hazard collider when the game reports a death; persistent learning tracks repeated failures by hazard or map-progress section and can stop Auto Play after three repeated failures.
+- Adds the required root-level `logo.png` for the Geode listing, moves the Pause shortcut away from the game's Settings control, prevents duplicate buttons, and enlarges/re-aligns Control Center controls.
+
+The object inventory is broad but not a complete physics engine: arbitrary triggers, custom hitboxes, dual paths and rapidly changing speed/gravity can still require testing. Start in Practice Mode and verify the target/action HUD before relying on Auto Play.
