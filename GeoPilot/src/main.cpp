@@ -49,6 +49,8 @@ namespace {
         int mapPads = 0;
         int mapSpeedPortals = 0;
         int mapDashRings = 0;
+        int mapTriggers = 0;
+        int mapCollectibles = 0;
         float mapProgress = 0.f;
         bool mapReady = false;
         std::string routeSignal = "MAP ANALYSIS";
@@ -275,6 +277,20 @@ namespace {
         }
     }
 
+    // Inventory trigger-like objects without flooding the navigation queue.
+    bool isTriggerLikeObject(GameObject* object) {
+        if (!object) return false;
+        return object->m_objectType == GameObjectType::Modifier ||
+               object->m_objectType == GameObjectType::EnterEffectObject;
+    }
+
+    bool isCollectibleObject(GameObject* object) {
+        if (!object) return false;
+        return object->m_objectType == GameObjectType::Collectible ||
+               object->m_objectType == GameObjectType::SecretCoin ||
+               object->m_objectType == GameObjectType::UserCoin;
+    }
+
     const char* orbName(int id) {
         switch (id) {
             case 36: return "YELLOW";
@@ -435,6 +451,8 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
         int mapPads = 0;
         int mapSpeedPortals = 0;
         int mapDashRings = 0;
+        int mapTriggers = 0;
+        int mapCollectibles = 0;
         bool mapAnalyzed = false;
         float lastTriggeredX = -100000.f;
         int lastTriggeredId = -1;
@@ -503,6 +521,8 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
         m_fields->mapPads = 0;
         m_fields->mapSpeedPortals = 0;
         m_fields->mapDashRings = 0;
+        m_fields->mapTriggers = 0;
+        m_fields->mapCollectibles = 0;
         const CCPoint initialPlayer = m_player1 ? nodeCenterInParent(m_player1, this) : CCPointZero;
         m_fields->mapStartX = initialPlayer.x;
         m_fields->mapEndX = initialPlayer.x;
@@ -512,6 +532,8 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
             if (!object || object == m_player1 || object->m_objectID < 0) continue;
             const auto p = nodeCenterInParent(object, this);
             m_fields->mapEndX = std::max(m_fields->mapEndX, p.x);
+            if (isTriggerLikeObject(object)) ++m_fields->mapTriggers;
+            if (isCollectibleObject(object)) ++m_fields->mapCollectibles;
 
             RouteKind kind;
             bool relevant = true;
@@ -556,13 +578,17 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
         g_state.mapPads = m_fields->mapPads;
         g_state.mapSpeedPortals = m_fields->mapSpeedPortals;
         g_state.mapDashRings = m_fields->mapDashRings;
+        g_state.mapTriggers = m_fields->mapTriggers;
+        g_state.mapCollectibles = m_fields->mapCollectibles;
         g_state.routeSignal = fmt::format(
-            "MAP READY H{} B{} O{} P{} SPD{} DASH{} PAD{}",
+            "MAP READY H{} B{} O{} P{} SPD{} DASH{} PAD{} TRG{} ITEM{}",
             m_fields->mapHazards, m_fields->mapSafeSurfaces, m_fields->mapOrbs,
-            m_fields->mapPortals, m_fields->mapSpeedPortals, m_fields->mapDashRings, m_fields->mapPads);
-        log::info("GeoPilot preflight: events={} hazards={} safe-surfaces={} orbs={} portals={} speed-portals={} dash-rings={} pads={}",
+            m_fields->mapPortals, m_fields->mapSpeedPortals, m_fields->mapDashRings,
+            m_fields->mapPads, m_fields->mapTriggers, m_fields->mapCollectibles);
+        log::info("GeoPilot preflight: events={} hazards={} safe-surfaces={} orbs={} portals={} speed-portals={} dash-rings={} pads={} triggers={} collectibles={}",
             m_fields->routePlan.size(), m_fields->mapHazards, m_fields->mapSafeSurfaces,
-            m_fields->mapOrbs, m_fields->mapPortals, m_fields->mapSpeedPortals, m_fields->mapDashRings, m_fields->mapPads);
+            m_fields->mapOrbs, m_fields->mapPortals, m_fields->mapSpeedPortals, m_fields->mapDashRings,
+            m_fields->mapPads, m_fields->mapTriggers, m_fields->mapCollectibles);
         return true;
     }
 
@@ -1117,14 +1143,15 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
             if (hudEnabled) {
                 const std::string hud = fmt::format(
                     "GEOPILOT {} | AUTO {} | MAP {} {:.1f}%\n"
-                    "MAP H{} B{} O{} PORT{} SPD{} DASH{} PAD{} | FRAME {} FPS {:.0f}\n"
+                    "MAP H{} B{} O{} PORT{} SPD{} DASH{} PAD{} TRG{} ITEM{} | FRAME {} FPS {:.0f}\n"
                     "SCAN {} objects / {} red / {} cyan / {} orb | LEAD {}f\n"
                     "PLAN {}\n"
                     "TARGET {} DIST {:.1f} ETA {} ORB {} | {}\nXP D{} A{} R{} / {}",
                     g_state.mode, enabled ? "ON" : "OFF",
                     g_state.mapReady ? "READY" : "SCAN", g_state.mapProgress,
                     g_state.mapHazards, g_state.mapSafeSurfaces, g_state.mapOrbs,
-                    g_state.mapPortals, g_state.mapSpeedPortals, g_state.mapDashRings, g_state.mapPads, g_state.frame, g_state.fps,
+                    g_state.mapPortals, g_state.mapSpeedPortals, g_state.mapDashRings, g_state.mapPads,
+                    g_state.mapTriggers, g_state.mapCollectibles, g_state.frame, g_state.fps,
                     g_state.scannedObjects, g_state.knownHazards, g_state.safeSurfaces,
                     g_state.recognizedOrbs, leadFrames,
                     g_state.routeSignal,
@@ -1232,13 +1259,14 @@ protected:
 
         if (m_statusLabel) {
             const std::string status = fmt::format(
-                "MAP PRECHECK {} {:.1f}% | H{} B{} O{} P{} SPD{} DASH{} PAD{}\n"
+                "MAP PRECHECK {} {:.1f}% | H{} B{} O{} P{} SPD{} DASH{} PAD{} TRG{} ITEM{}\n"
                 "NEXT: {}\nMODE {} FRAME {} FPS {:.0f}\n"
                 "SCAN {} objects / {} red / {} cyan / {} orb\n"
                 "TARGET {} ETA {} ORB {} ACTION {}\nXP D{} A{} R{} / {}",
                 g_state.mapReady ? "READY" : "WAIT",
                 g_state.mapProgress, g_state.mapHazards, g_state.mapSafeSurfaces,
-                g_state.mapOrbs, g_state.mapPortals, g_state.mapSpeedPortals, g_state.mapDashRings, g_state.mapPads,
+                g_state.mapOrbs, g_state.mapPortals, g_state.mapSpeedPortals, g_state.mapDashRings,
+                g_state.mapPads, g_state.mapTriggers, g_state.mapCollectibles,
                 g_state.routeSignal, g_state.mode, g_state.frame, g_state.fps,
                 g_state.scannedObjects, g_state.knownHazards, g_state.safeSurfaces,
                 g_state.recognizedOrbs,

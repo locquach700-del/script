@@ -8,9 +8,9 @@
   },
   "id": "noob.geopilot",
   "name": "GeoPilot Auto Play",
-  "version": "v0.4.5",
+  "version": "v0.4.6",
   "developer": "Noob",
-  "description": "Conservative Cube spike logic, variable Robot jump holds, repeat-death safety, persistent learning, and expanded orb/portal scanning.",
+  "description": "Geometry Dash route inventory with safer Cube/Robot input, repeat-death protection, orb, dash, speed portal, trigger and collectible scanning.",
   "repository": "https://github.com/locquach700-del/script/tree/geopilot-build/GeoPilot",
   "settings": {
     "controller-title": {

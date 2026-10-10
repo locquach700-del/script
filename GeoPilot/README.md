@@ -1,4 +1,4 @@
-# GeoPilot Auto Play v0.4.5 — Geometry Dash 2.2081 / Geode 5.10.1
+# GeoPilot Auto Play v0.4.6 — Geometry Dash 2.2081 / Geode 5.10.1
 
 ## Included
 - Bundled GeoPilot icon, shown as the single button inside Pause. Click it to open Control Center.
@@ -58,3 +58,9 @@ Use Practice Mode when first testing a level. Custom hitboxes, unusual spike IDs
 ## v0.4.5 — variable Robot jump input
 - Robot jumps now hold the input briefly when the predicted obstacle/platform is tall, instead of being forced into a one-frame tap every time. Orb activations remain taps; an elevated-orb approach can use a controlled short hold.
 - Hold duration is capped and is still a heuristic, so difficult Robot timings should be tested in Practice Mode.
+
+
+## v0.4.6 — wider map inventory
+- Preflight counts modifier/enter-effect objects as dynamic triggers, plus user coins, secret coins, and collectibles.
+- These categories appear in map totals but are deliberately not inserted into the jump-action queue, because a level may contain many non-navigation triggers.
+- This detects categories; it does not simulate every move/toggle/spawn/camera/keyframe trigger or every custom collision setup.
