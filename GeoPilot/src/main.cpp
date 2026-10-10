@@ -9,6 +9,7 @@
 #include <Geode/binding/PauseLayer.hpp>
 #include <Geode/binding/PlayerObject.hpp>
 #include <Geode/binding/GameObject.hpp>
+#include <Geode/binding/GJGameLevel.hpp>
 #include <Geode/binding/ButtonSprite.hpp>
 #include <Geode/binding/CCMenuItemSpriteExtra.hpp>
 #include <Geode/cocos/draw_nodes/CCDrawNode.h>
