@@ -17,6 +17,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <filesystem>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -52,6 +54,9 @@ namespace {
         int targetId = -1;
         int orbTargetId = -1;
         bool enabled = false;
+        int experienceDeaths = 0;
+        int experienceAttempts = 0;
+        std::string experienceHint = "FIRST RUN";
     };
 
     RuntimeState g_state;
@@ -116,6 +121,36 @@ namespace {
             default:
                 return false;
         }
+    }
+
+    bool isKnownSpikeID(int id) {
+        switch (id) {
+            case 8: case 39: case 103: case 392:
+            case 144: case 145: case 205: case 459:
+            case 177: case 178: case 179:
+            case 216: case 217: case 218: case 458:
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    // Cube reacts only to a spike in its standing lane. A hazard entirely
+    // above the player's head remains visible but never triggers a normal jump.
+    bool isCubeSpikeInStandingLane(GameObject* object, CCPoint objectCenter,
+                                   CCPoint playerCenter, PlayerObject* player) {
+        if (!object || !player || !isKnownSpikeID(object->m_objectID)) return false;
+        const float playerHalfH = std::max(6.f, player->getContentSize().height *
+            std::abs(player->getScaleY()) * 0.5f);
+        const float hazardHalfH = std::max(4.f, object->getContentSize().height *
+            std::abs(object->getScaleY()) * 0.5f);
+        const float playerHead = playerCenter.y + playerHalfH;
+        const float playerFoot = playerCenter.y - playerHalfH;
+        const float hazardBottom = objectCenter.y - hazardHalfH;
+        const float hazardTop = objectCenter.y + hazardHalfH;
+        const bool overhead = hazardBottom > playerHead + 5.f;
+        const bool farBelow = hazardTop < playerFoot - 22.f;
+        return !overhead && !farBelow;
     }
 
     // Classify by Geometry Dash's object type as well as well-known IDs.
@@ -295,6 +330,27 @@ namespace {
         if (frames < 0.f || frames > 9999.f) return "--";
         return fmt::format("{:.0f}f", std::max(0.f, frames));
     }
+
+    std::string learningKeyForLevel(GJGameLevel* level) {
+        if (!level) return "learning/level-unknown";
+        if (level->m_levelID != 0)
+            return fmt::format("learning/level-{}", level->m_levelID);
+        return fmt::format("learning/local-{}", std::hash<std::string>{}(level->m_levelName));
+    }
+
+    CCSprite* createGeoPilotLogo() {
+        const auto base = Mod::get()->getResourcesDir();
+        const std::filesystem::path candidates[] = {
+            base / "geopilot-logo.png",
+            base / "resources" / "geopilot-logo.png"
+        };
+        for (auto const& path : candidates) {
+            if (!std::filesystem::exists(path)) continue;
+            if (auto sprite = CCSprite::create(path.string().c_str())) return sprite;
+        }
+        log::warn("GeoPilot logo could not be loaded from mod resources: {}", base.string());
+        return nullptr;
+    }
 }
 
 class $modify(GeoPilotPlayLayer, PlayLayer) {
@@ -326,6 +382,13 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
         bool jumpHeld = false;
         bool rightHeld = false;
         float logTimer = 0.f;
+        bool deathRecordedThisRun = false;
+        std::string learningKey;
+        int experienceDeaths = 0;
+        int experienceAttempts = 0;
+        int learnedHazardId = -1;
+        float learnedHazardDistance = -1.f;
+        std::string learnedLastAction = "NONE";
     };
 
     bool init(GJGameLevel* level, bool useReplay, bool dontCreateObjects) {
@@ -350,6 +413,19 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
         m_fields->lastOrbApproach = nullptr;
         m_fields->lastOrbTriggered = nullptr;
         m_fields->lastSafePlatform = nullptr;
+        m_fields->deathRecordedThisRun = false;
+        m_fields->learningKey = learningKeyForLevel(level);
+        auto* memory = Mod::get();
+        m_fields->experienceDeaths = memory->getSavedValue<int>(m_fields->learningKey + "/deaths", 0);
+        m_fields->experienceAttempts = memory->getSavedValue<int>(m_fields->learningKey + "/attempts", 0) + 1;
+        m_fields->learnedHazardId = memory->getSavedValue<int>(m_fields->learningKey + "/last-hazard-id", -1);
+        m_fields->learnedHazardDistance = memory->getSavedValue<float>(m_fields->learningKey + "/last-hazard-distance", -1.f);
+        m_fields->learnedLastAction = memory->getSavedValue<std::string>(m_fields->learningKey + "/last-action", "NONE");
+        memory->setSavedValue<int>(m_fields->learningKey + "/attempts", m_fields->experienceAttempts);
+        g_state.experienceDeaths = m_fields->experienceDeaths;
+        g_state.experienceAttempts = m_fields->experienceAttempts;
+        g_state.experienceHint = m_fields->learnedLastAction == "NONE"
+            ? "FIRST RUN" : fmt::format("RETRY {}", m_fields->learnedLastAction);
 
         // Preflight the entire already-loaded level object list before Auto Play
         // can make its first decision. This is a static route inventory, not a
@@ -430,10 +506,29 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
             m_fields->jumpHeld = false;
         }
 
+        if (player && !player->m_isDead) m_fields->deathRecordedThisRun = false;
         if (!player || player->m_isDead || m_isPaused) {
             if (m_fields->scanDraw) m_fields->scanDraw->clear();
             if (m_fields->hudLabel) m_fields->hudLabel->setVisible(false);
             if (player && player->m_isDead) {
+                if (!m_fields->deathRecordedThisRun) {
+                    auto* memory = Mod::get();
+                    m_fields->experienceDeaths = memory->getSavedValue<int>(m_fields->learningKey + "/deaths", 0) + 1;
+                    memory->setSavedValue<int>(m_fields->learningKey + "/deaths", m_fields->experienceDeaths);
+                    memory->setSavedValue<int>(m_fields->learningKey + "/last-hazard-id", g_state.targetId);
+                    memory->setSavedValue<float>(m_fields->learningKey + "/last-hazard-distance", g_state.distance);
+                    memory->setSavedValue<std::string>(m_fields->learningKey + "/last-action", g_state.action);
+                    m_fields->learnedHazardId = g_state.targetId;
+                    m_fields->learnedHazardDistance = g_state.distance;
+                    m_fields->learnedLastAction = g_state.action;
+                    g_state.experienceDeaths = m_fields->experienceDeaths;
+                    g_state.experienceAttempts = m_fields->experienceAttempts;
+                    g_state.experienceHint = fmt::format("DIED: {}", g_state.action);
+                    m_fields->deathRecordedThisRun = true;
+                    log::info("GeoPilot learning: level deaths={} attempts={} target={} distance={:.1f} action={}",
+                        m_fields->experienceDeaths, m_fields->experienceAttempts, g_state.targetId,
+                        g_state.distance, g_state.action);
+                }
                 m_fields->previousNearest = nullptr;
                 m_fields->lastTriggeredHazard = nullptr;
                 m_fields->lastOrbApproach = nullptr;
@@ -515,9 +610,12 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
             target.orb = orb;
             target.contactDistance = dx - approximateHalfWidth(object) - approximateHalfWidth(player);
             targets.push_back(target);
-            if (hazard && dx > -30.f) hazards.push_back(target);
-            if (safeSurface && dx > -30.f) safeSurfaces.push_back(target);
-            if (orb && dx > -30.f && std::abs(dy) <= 220.f) orbs.push_back(target);
+            const bool actionableHazard = mode == PilotMode::Cube
+                ? isCubeSpikeInStandingLane(object, objectCenter, playerCenter, player)
+                : hazard;
+            if (actionableHazard && dx > 0.f) hazards.push_back(target);
+            if (safeSurface && dx > 0.f) safeSurfaces.push_back(target);
+            if (orb && dx > -8.f && std::abs(dy) <= 220.f) orbs.push_back(target);
         }
 
         std::sort(targets.begin(), targets.end(), [](ScanTarget const& a, ScanTarget const& b) {
@@ -548,6 +646,8 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
             const CCPoint eventPoint = nodeCenterInParent(event.object, this);
             const float dx = eventPoint.x - playerCenter.x;
             if (dx < -22.f) continue;
+            if (mode == PilotMode::Cube && event.kind == RouteKind::Hazard &&
+                !isCubeSpikeInStandingLane(event.object, eventPoint, playerCenter, player)) continue;
             if (event.kind == RouteKind::SafeSurface && dx - lastSafeSignalX < 42.f) continue;
             if (event.kind == RouteKind::SafeSurface) lastSafeSignalX = dx;
             if (planItems > 0) routeSignal += "  >  ";
@@ -734,7 +834,7 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
             }
         }
 
-        if (stepSurfaceTarget && pulseControlMode(mode)) {
+        if (stepSurfaceTarget && pulseControlMode(mode) && mode != PilotMode::Cube) {
             platformTriggerDistance = std::clamp(
                 closingPerFrame * static_cast<float>(leadFrames) +
                 std::max(0.f, selectedStepHeight) * 0.22f + 4.f, 22.f, 82.f);
@@ -812,10 +912,20 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
             g_state.action = fmt::format("JUMP TO SAFE BLOCK / +{:.0f}px", platformTriggerDistance);
             platformAction = true;
         } else if (nearestHazard && pulseControlMode(mode) && m_fields->releaseCooldown <= 0.f) {
-            const float speedLeadDistance = closingPerFrame * static_cast<float>(leadFrames);
-            const float triggerDistance = std::clamp(speedLeadDistance + 4.f, 20.f, 58.f);
+            int learnedExtraFrames = 0;
+            const bool sameLearnedSpike =
+                nearestHazard->object->m_objectID == m_fields->learnedHazardId &&
+                m_fields->learnedHazardDistance >= 0.f &&
+                std::abs(nearestHazard->dx - m_fields->learnedHazardDistance) <= 52.f;
+            if (sameLearnedSpike && m_fields->experienceDeaths > 0 &&
+                m_fields->learnedLastAction.find("ORB") == std::string::npos) {
+                learnedExtraFrames = std::min(2, m_fields->experienceDeaths);
+            }
+            const float speedLeadDistance = closingPerFrame * static_cast<float>(leadFrames + learnedExtraFrames);
+            const float triggerDistance = std::clamp(speedLeadDistance + 4.f, 20.f, 72.f);
+            const int effectiveLeadFrames = leadFrames + learnedExtraFrames;
             const bool inTimingWindow =
-                (framesToImpact >= 0.f && framesToImpact <= static_cast<float>(leadFrames)) ||
+                (framesToImpact >= 0.f && framesToImpact <= static_cast<float>(effectiveLeadFrames)) ||
                 nearestHazard->contactDistance <= triggerDistance;
 
             if (!inTimingWindow) {
@@ -830,7 +940,9 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
                     m_fields->lastTriggeredHazard = nearestHazard->object;
                     m_fields->lastTriggeredX = nearestHazard->point.x;
                     m_fields->lastTriggeredId = nearestHazard->object->m_objectID;
-                    g_state.action = fmt::format("DODGE RED / {}F", leadFrames);
+                    g_state.action = learnedExtraFrames > 0
+                        ? fmt::format("LEARNED DODGE / +{}F", learnedExtraFrames)
+                        : fmt::format("DODGE RED / {}F", leadFrames);
                 } else {
                     g_state.action = "TRACK RED / ALREADY TAPPED";
                 }
@@ -892,7 +1004,7 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
                     "MAP H{} B{} O{} PORT{} PAD{} | FRAME {} FPS {:.0f}\n"
                     "SCAN {} objects / {} red / {} cyan / {} orb | LEAD {}f\n"
                     "PLAN {}\n"
-                    "TARGET {} DIST {:.1f} ETA {} ORB {} | {}",
+                    "TARGET {} DIST {:.1f} ETA {} ORB {} | {}\nXP D{} A{} / {}",
                     g_state.mode, enabled ? "ON" : "OFF",
                     g_state.mapReady ? "READY" : "SCAN", g_state.mapProgress,
                     g_state.mapHazards, g_state.mapSafeSurfaces, g_state.mapOrbs,
@@ -902,7 +1014,8 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
                     g_state.routeSignal,
                     g_state.targetId < 0 ? "--" : std::to_string(g_state.targetId),
                     g_state.distance, etaText(g_state.framesToImpact),
-                    g_state.orbTargetId < 0 ? "--" : std::string(orbName(g_state.orbTargetId)), g_state.action
+                    g_state.orbTargetId < 0 ? "--" : std::string(orbName(g_state.orbTargetId)), g_state.action,
+                    g_state.experienceDeaths, g_state.experienceAttempts, g_state.experienceHint
                 );
                 m_fields->hudLabel->setString(hud.c_str());
             }
@@ -937,7 +1050,7 @@ protected:
     CCLabelBMFont* m_statusLabel = nullptr;
 
     bool init() {
-        if (!Popup::init(360.f, 260.f, "square01_001.png")) return false;
+        if (!Popup::init(420.f, 320.f, "square01_001.png")) return false;
         setTitle("GeoPilot Control Center");
 
         auto menu = CCMenu::create();
@@ -947,18 +1060,17 @@ protected:
         auto addButton = [&](const char* text, CCPoint pos, SEL_MenuHandler selector) -> ButtonSprite* {
             auto sprite = ButtonSprite::create(text, "bigFont.fnt", "GJ_button_04.png", 0.70f);
             if (!sprite) return nullptr;
-            sprite->setScale(0.50f);
+            sprite->setScale(0.44f);
             auto item = CCMenuItemSpriteExtra::create(sprite, nullptr, this, selector);
             item->setPosition(pos);
             menu->addChild(item);
             return sprite;
         };
 
-        const auto logoPath = Mod::get()->getResourcesDir() / "geopilot-logo.png";
-        auto logo = CCSprite::create(logoPath.string().c_str());
+        auto logo = createGeoPilotLogo();
         if (logo) {
-            logo->setScale(0.44f);
-            logo->setPosition({34.f, 215.f});
+            logo->setScale(0.50f);
+            logo->setPosition({34.f, 273.f});
             this->addChild(logo, 8);
         }
 
@@ -966,23 +1078,23 @@ protected:
         if (subtitle) {
             subtitle->setScale(0.53f);
             subtitle->setAnchorPoint({0.f, 0.5f});
-            subtitle->setPosition({59.f, 213.f});
+            subtitle->setPosition({61.f, 273.f});
             subtitle->setColor({100, 220, 255});
             this->addChild(subtitle, 8);
         }
 
-        m_autoSprite = addButton("", {91.f, 170.f}, menu_selector(GeoPilotSettingsPopup::onToggleAuto));
-        m_orbSprite = addButton("", {263.f, 170.f}, menu_selector(GeoPilotSettingsPopup::onToggleOrbs));
-        m_raysSprite = addButton("", {91.f, 135.f}, menu_selector(GeoPilotSettingsPopup::onToggleRays));
-        m_hudSprite = addButton("", {263.f, 135.f}, menu_selector(GeoPilotSettingsPopup::onToggleHud));
-        m_modeSprite = addButton("", {91.f, 100.f}, menu_selector(GeoPilotSettingsPopup::onCycleMode));
-        m_leadSprite = addButton("", {263.f, 100.f}, menu_selector(GeoPilotSettingsPopup::onCycleLead));
-        m_rangeSprite = addButton("", {180.f, 65.f}, menu_selector(GeoPilotSettingsPopup::onCycleRange));
+        m_autoSprite = addButton("", {112.f, 224.f}, menu_selector(GeoPilotSettingsPopup::onToggleAuto));
+        m_orbSprite = addButton("", {308.f, 224.f}, menu_selector(GeoPilotSettingsPopup::onToggleOrbs));
+        m_raysSprite = addButton("", {112.f, 185.f}, menu_selector(GeoPilotSettingsPopup::onToggleRays));
+        m_hudSprite = addButton("", {308.f, 185.f}, menu_selector(GeoPilotSettingsPopup::onToggleHud));
+        m_modeSprite = addButton("", {112.f, 146.f}, menu_selector(GeoPilotSettingsPopup::onCycleMode));
+        m_leadSprite = addButton("", {308.f, 146.f}, menu_selector(GeoPilotSettingsPopup::onCycleLead));
+        m_rangeSprite = addButton("", {210.f, 107.f}, menu_selector(GeoPilotSettingsPopup::onCycleRange));
 
         m_statusLabel = CCLabelBMFont::create("", "chatFont.fnt");
         if (m_statusLabel) {
-            m_statusLabel->setScale(0.43f);
-            m_statusLabel->setPosition({180.f, 28.f});
+            m_statusLabel->setScale(0.30f);
+            m_statusLabel->setPosition({210.f, 48.f});
             m_statusLabel->setColor({150, 225, 255});
             this->addChild(m_statusLabel, 8);
         }
@@ -1006,7 +1118,7 @@ protected:
                 "MAP PRECHECK {} {:.1f}% | H{} B{} O{} P{} PAD{}\n"
                 "NEXT: {}\nMODE {} FRAME {} FPS {:.0f}\n"
                 "SCAN {} objects / {} red / {} cyan / {} orb\n"
-                "TARGET {} ETA {} ORB {} ACTION {}",
+                "TARGET {} ETA {} ORB {} ACTION {}\nXP D{} A{} / {}",
                 g_state.mapReady ? "READY" : "WAIT",
                 g_state.mapProgress, g_state.mapHazards, g_state.mapSafeSurfaces,
                 g_state.mapOrbs, g_state.mapPortals, g_state.mapPads,
@@ -1016,7 +1128,8 @@ protected:
                 g_state.targetId < 0 ? "--" : std::to_string(g_state.targetId),
                 etaText(g_state.framesToImpact),
                 g_state.orbTargetId < 0 ? "--" : std::string(orbName(g_state.orbTargetId)),
-                g_state.action
+                g_state.action, g_state.experienceDeaths, g_state.experienceAttempts,
+                g_state.experienceHint
             );
             m_statusLabel->setString(status.c_str());
         }
@@ -1086,33 +1199,32 @@ class $modify(GeoPilotPauseLayer, PauseLayer) {
         PauseLayer::customSetup();
 
         const auto win = CCDirector::sharedDirector()->getWinSize();
-        const auto logoPath = Mod::get()->getResourcesDir() / "geopilot-logo.png";
-        auto logo = CCSprite::create(logoPath.string().c_str());
+        auto logo = createGeoPilotLogo();
         if (!logo) {
             auto fallback = ButtonSprite::create("GEOPILOT", "bigFont.fnt", "GJ_button_04.png", 0.7f);
             fallback->setScale(0.50f);
             auto item = CCMenuItemSpriteExtra::create(
                 fallback, nullptr, this, menu_selector(GeoPilotPauseLayer::onOpenSettings));
             auto menu = CCMenu::create();
-            menu->setPosition({win.width - 48.f, win.height - 40.f});
+            menu->setPosition({win.width - 42.f, win.height * 0.50f});
             menu->addChild(item);
             this->addChild(menu, 10);
             return;
         }
 
-        logo->setScale(0.48f);
+        logo->setScale(0.58f);
         auto item = CCMenuItemSpriteExtra::create(
             logo, nullptr, this, menu_selector(GeoPilotPauseLayer::onOpenSettings));
         item->setID("geopilot-settings-button");
         auto menu = CCMenu::create();
-        menu->setPosition({win.width - 36.f, win.height - 36.f});
+        menu->setPosition({win.width - 42.f, win.height * 0.50f});
         menu->addChild(item);
         this->addChild(menu, 10);
 
         auto label = CCLabelBMFont::create("GEOPILOT", "chatFont.fnt");
         if (label) {
             label->setScale(0.46f);
-            label->setPosition({win.width - 36.f, win.height - 61.f});
+            label->setPosition({win.width - 42.f, win.height * 0.50f - 28.f});
             label->setColor({100, 220, 255});
             this->addChild(label, 10);
         }

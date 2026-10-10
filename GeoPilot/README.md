@@ -1,4 +1,4 @@
-# GeoPilot Auto Play v0.4.1 — Geometry Dash 2.2081 / Geode 5.10.1
+# GeoPilot Auto Play v0.4.2 — Geometry Dash 2.2081 / Geode 5.10.1
 
 ## Included
 - Bundled GeoPilot icon, shown as the single button inside Pause. Click it to open Control Center.
@@ -27,3 +27,15 @@ Local SDK commands:
 - geode sdk install
 - geode sdk install-binaries
 - geode build
+
+
+## v0.4.2 — reliability and learning update
+- Cube hazard decisions only use recognized spike IDs ahead of the player and within the standing lane. Hazards fully above the player's head remain visible in the scan, but they do not trigger a Cube jump.
+- Cube no longer jumps just to climb cyan safe blocks; explicit Orb Assist remains a separate behavior.
+- Passed targets are filtered out of normal jump decisions, reducing repeated inputs around dense object groups.
+- The mod logo is loaded from either supported resource path; the Pause button is moved away from the game's top-right Settings control.
+- Control Center enlarged and re-spaced. Its status includes level attempts, deaths, and the last failure action.
+- Persistent learning records death counts and the last target/action per level. When a retry reaches a matching target near the recorded failure distance, the bot can add up to two frames of extra lead. This is a heuristic, not a full physics simulator.
+- Added the root `logo.png` used by Geode's in-game mod listing.
+
+Use Practice Mode when first testing a level. Custom hitboxes, unusual spike IDs, gravity flips, and tightly scripted orb sequences can still require manual adjustment.
