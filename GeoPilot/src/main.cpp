@@ -442,6 +442,7 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
         GameObject* lastOrbTriggered = nullptr;
         GameObject* lastSafePlatform = nullptr;
         std::vector<RouteEvent> routePlan;
+        size_t routeCursor = 0;
         float mapStartX = 0.f;
         float mapEndX = 0.f;
         int mapHazards = 0;
@@ -514,6 +515,7 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
         // can make its first decision. This is a static route inventory, not a
         // full physics simulation; live timing is still recalculated every frame.
         m_fields->routePlan.clear();
+        m_fields->routeCursor = 0;
         m_fields->mapHazards = 0;
         m_fields->mapSafeSurfaces = 0;
         m_fields->mapOrbs = 0;
@@ -742,22 +744,24 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
             if ((orb || contactRing) && dx > -8.f && std::abs(dy) <= 220.f) orbs.push_back(target);
         }
 
-        std::sort(targets.begin(), targets.end(), [](ScanTarget const& a, ScanTarget const& b) {
-            return a.dx < b.dx;
-        });
-        std::sort(hazards.begin(), hazards.end(), [](ScanTarget const& a, ScanTarget const& b) {
-            return a.contactDistance < b.contactDistance;
-        });
-        std::sort(orbs.begin(), orbs.end(), [](ScanTarget const& a, ScanTarget const& b) {
-            return a.dx < b.dx;
-        });
-        std::sort(safeSurfaces.begin(), safeSurfaces.end(), [](ScanTarget const& a, ScanTarget const& b) {
-            return a.contactDistance < b.contactDistance;
-        });
+        // Rays use only the eight closest visual targets. Sorting every decorative
+        // object each frame was unnecessarily expensive on dense 2.2 levels.
+        const size_t rayTargetCount = std::min<size_t>(8, targets.size());
+        if (rayTargetCount > 0) {
+            std::partial_sort(targets.begin(), targets.begin() + rayTargetCount, targets.end(),
+                [](ScanTarget const& a, ScanTarget const& b) { return a.dx < b.dx; });
+        }
+        targets.resize(rayTargetCount);
 
-        ScanTarget const* nearestHazard = hazards.empty() ? nullptr : &hazards.front();
-        ScanTarget const* nearestOrb = orbs.empty() ? nullptr : &orbs.front();
-        ScanTarget const* nearestSafeSurface = safeSurfaces.empty() ? nullptr : &safeSurfaces.front();
+        auto nearestHazardIt = std::min_element(hazards.begin(), hazards.end(),
+            [](ScanTarget const& a, ScanTarget const& b) { return a.contactDistance < b.contactDistance; });
+        auto nearestOrbIt = std::min_element(orbs.begin(), orbs.end(),
+            [](ScanTarget const& a, ScanTarget const& b) { return a.dx < b.dx; });
+        auto nearestSurfaceIt = std::min_element(safeSurfaces.begin(), safeSurfaces.end(),
+            [](ScanTarget const& a, ScanTarget const& b) { return a.contactDistance < b.contactDistance; });
+        ScanTarget const* nearestHazard = nearestHazardIt == hazards.end() ? nullptr : &*nearestHazardIt;
+        ScanTarget const* nearestOrb = nearestOrbIt == orbs.end() ? nullptr : &*nearestOrbIt;
+        ScanTarget const* nearestSafeSurface = nearestSurfaceIt == safeSurfaces.end() ? nullptr : &*nearestSurfaceIt;
         if (nearestOrb) g_state.orbTargetId = nearestOrb->object->m_objectID;
 
         // Produce a route signal from the preflight map: the next few events are
@@ -765,7 +769,24 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
         std::string routeSignal;
         int planItems = 0;
         float lastSafeSignalX = -100000.f;
-        for (auto const& event : m_fields->routePlan) {
+        // Advance the route cursor past events that are behind or disabled.
+        // The plan is pre-sorted at load time; scanning from the start every frame
+        // becomes O(level-size) and caused avoidable stalls in object-heavy levels.
+        while (m_fields->routeCursor < m_fields->routePlan.size()) {
+            auto const& event = m_fields->routePlan[m_fields->routeCursor];
+            if (!event.object || event.object->m_isDisabled) {
+                ++m_fields->routeCursor;
+                continue;
+            }
+            const float dx = nodeCenterInParent(event.object, this).x - playerCenter.x;
+            if (dx < -22.f) {
+                ++m_fields->routeCursor;
+                continue;
+            }
+            break;
+        }
+        for (size_t i = m_fields->routeCursor; i < m_fields->routePlan.size(); ++i) {
+            auto const& event = m_fields->routePlan[i];
             if (!event.object || event.object->m_isDisabled) continue;
             const CCPoint eventPoint = nodeCenterInParent(event.object, this);
             const float dx = eventPoint.x - playerCenter.x;
@@ -959,10 +980,10 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
             const float stepHeight = platformTop - playerFoot;
             if (stepHeight > 8.f && stepHeight < 118.f &&
                 platform.contactDistance > -10.f &&
-                platform.contactDistance < 180.f) {
+                platform.contactDistance < 180.f &&
+                (!stepSurfaceTarget || platform.contactDistance < stepSurfaceTarget->contactDistance)) {
                 stepSurfaceTarget = &platform;
                 selectedStepHeight = stepHeight;
-                break;
             }
         }
 

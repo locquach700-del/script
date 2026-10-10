@@ -1,4 +1,4 @@
-# GeoPilot Auto Play v0.4.6 — Geometry Dash 2.2081 / Geode 5.10.1
+# GeoPilot Auto Play v0.4.7 — Geometry Dash 2.2081 / Geode 5.10.1
 
 ## Included
 - Bundled GeoPilot icon, shown as the single button inside Pause. Click it to open Control Center.
@@ -64,3 +64,10 @@ Use Practice Mode when first testing a level. Custom hitboxes, unusual spike IDs
 - Preflight counts modifier/enter-effect objects as dynamic triggers, plus user coins, secret coins, and collectibles.
 - These categories appear in map totals but are deliberately not inserted into the jump-action queue, because a level may contain many non-navigation triggers.
 - This detects categories; it does not simulate every move/toggle/spawn/camera/keyframe trigger or every custom collision setup.
+
+
+## v0.4.7 — dense-level performance
+- Uses partial sorting to select only the eight closest objects for scan-ray drawing; it no longer fully sorts every nearby decorative object each frame.
+- Selects the closest hazard/orb/surface with linear minimum searches rather than sorting all candidates.
+- Adds a forward route cursor to avoid rescanning passed events from the beginning of the entire level every frame.
+- Chooses the nearest eligible cyan step surface explicitly, so removing surface sorting does not change target selection.

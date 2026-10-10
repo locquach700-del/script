@@ -8,9 +8,9 @@
   },
   "id": "noob.geopilot",
   "name": "GeoPilot Auto Play",
-  "version": "v0.4.6",
+  "version": "v0.4.7",
   "developer": "Noob",
-  "description": "Geometry Dash route inventory with safer Cube/Robot input, repeat-death protection, orb, dash, speed portal, trigger and collectible scanning.",
+  "description": "Faster dense-level scanning, safer Cube/Robot input, repeat-death learning, and expanded orb, portal, trigger and collectible inventory.",
   "repository": "https://github.com/locquach700-del/script/tree/geopilot-build/GeoPilot",
   "settings": {
     "controller-title": {
