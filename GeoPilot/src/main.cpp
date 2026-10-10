@@ -59,6 +59,7 @@ namespace {
         bool enabled = false;
         int experienceDeaths = 0;
         int experienceAttempts = 0;
+        int experienceStreak = 0;
         std::string experienceHint = "FIRST RUN";
     };
 
@@ -111,11 +112,15 @@ namespace {
         switch (id) {
             // Standard spikes
             case 8: case 39: case 103: case 392:
-            // Invisible spikes
-            case 144: case 145: case 205: case 459:
-            // Color and ice spikes
-            case 177: case 178: case 179:
-            case 216: case 217: case 218: case 458:
+            // Invisible spikes (206 is the half spike; 205 is a safe slab)
+            case 144: case 145: case 206: case 459:
+            // Colored and ice spikes, including tiny variants
+            case 177: case 178: case 179: case 180:
+            case 216: case 217: case 218: case 219: case 458:
+            // Known black spikes and sloped spike hazards
+            case 363: case 364: case 365:
+            case 421: case 422:
+            case 1716: case 1717: case 1718:
             // Common saw / blade objects
             case 740: case 741: case 742:
             case 1705: case 1706: case 1707:
@@ -129,9 +134,12 @@ namespace {
     bool isKnownSpikeID(int id) {
         switch (id) {
             case 8: case 39: case 103: case 392:
-            case 144: case 145: case 205: case 459:
-            case 177: case 178: case 179:
-            case 216: case 217: case 218: case 458:
+            case 144: case 145: case 206: case 459:
+            case 177: case 178: case 179: case 180:
+            case 216: case 217: case 218: case 219: case 458:
+            case 363: case 364: case 365:
+            case 421: case 422:
+            case 1716: case 1717: case 1718:
                 return true;
             default:
                 return false;
@@ -430,6 +438,7 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
         std::string learningKey;
         int experienceDeaths = 0;
         int experienceAttempts = 0;
+        int repeatFailures = 0;
         int learnedHazardId = -1;
         float learnedHazardDistance = -1.f;
         std::string learnedLastAction = "NONE";
@@ -462,12 +471,14 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
         auto* memory = Mod::get();
         m_fields->experienceDeaths = memory->getSavedValue<int>(m_fields->learningKey + "/deaths", 0);
         m_fields->experienceAttempts = memory->getSavedValue<int>(m_fields->learningKey + "/attempts", 0) + 1;
+        m_fields->repeatFailures = memory->getSavedValue<int>(m_fields->learningKey + "/repeat-failures", 0);
         m_fields->learnedHazardId = memory->getSavedValue<int>(m_fields->learningKey + "/last-hazard-id", -1);
         m_fields->learnedHazardDistance = memory->getSavedValue<float>(m_fields->learningKey + "/last-hazard-distance", -1.f);
         m_fields->learnedLastAction = memory->getSavedValue<std::string>(m_fields->learningKey + "/last-action", "NONE");
         memory->setSavedValue<int>(m_fields->learningKey + "/attempts", m_fields->experienceAttempts);
         g_state.experienceDeaths = m_fields->experienceDeaths;
         g_state.experienceAttempts = m_fields->experienceAttempts;
+        g_state.experienceStreak = m_fields->repeatFailures;
         g_state.experienceHint = m_fields->learnedLastAction == "NONE"
             ? "FIRST RUN" : fmt::format("RETRY {}", m_fields->learnedLastAction);
 
@@ -569,6 +580,15 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
                     auto* memory = Mod::get();
                     m_fields->experienceDeaths = memory->getSavedValue<int>(m_fields->learningKey + "/deaths", 0) + 1;
                     memory->setSavedValue<int>(m_fields->learningKey + "/deaths", m_fields->experienceDeaths);
+                    const int previousHazardId = memory->getSavedValue<int>(m_fields->learningKey + "/last-hazard-id", -1);
+                    const float previousDistance = memory->getSavedValue<float>(m_fields->learningKey + "/last-hazard-distance", -1.f);
+                    const int previousStreak = memory->getSavedValue<int>(m_fields->learningKey + "/repeat-failures", 0);
+                    const bool sameFailure = g_state.targetId >= 0 &&
+                        previousHazardId == g_state.targetId && previousDistance >= 0.f &&
+                        std::abs(g_state.distance - previousDistance) <= 52.f;
+                    m_fields->repeatFailures = sameFailure ? previousStreak + 1 :
+                        (g_state.targetId >= 0 ? 1 : 0);
+                    memory->setSavedValue<int>(m_fields->learningKey + "/repeat-failures", m_fields->repeatFailures);
                     memory->setSavedValue<int>(m_fields->learningKey + "/last-hazard-id", g_state.targetId);
                     memory->setSavedValue<float>(m_fields->learningKey + "/last-hazard-distance", g_state.distance);
                     memory->setSavedValue<std::string>(m_fields->learningKey + "/last-action", g_state.action);
@@ -577,7 +597,14 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
                     m_fields->learnedLastAction = g_state.action;
                     g_state.experienceDeaths = m_fields->experienceDeaths;
                     g_state.experienceAttempts = m_fields->experienceAttempts;
+                    g_state.experienceStreak = m_fields->repeatFailures;
                     g_state.experienceHint = fmt::format("DIED: {}", g_state.action);
+                    if (m_fields->repeatFailures >= 3) {
+                        memory->setSettingValue<bool>("auto-play", false);
+                        g_state.enabled = false;
+                        g_state.action = "SAFE STOP / SAME DEATH x3";
+                        g_state.experienceHint = "AUTO OFF / REPEATED DEATH";
+                    }
                     m_fields->deathRecordedThisRun = true;
                     log::info("GeoPilot learning: level deaths={} attempts={} target={} distance={:.1f} action={}",
                         m_fields->experienceDeaths, m_fields->experienceAttempts, g_state.targetId,
@@ -1065,7 +1092,7 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
                     "MAP H{} B{} O{} PORT{} SPD{} DASH{} PAD{} | FRAME {} FPS {:.0f}\n"
                     "SCAN {} objects / {} red / {} cyan / {} orb | LEAD {}f\n"
                     "PLAN {}\n"
-                    "TARGET {} DIST {:.1f} ETA {} ORB {} | {}\nXP D{} A{} / {}",
+                    "TARGET {} DIST {:.1f} ETA {} ORB {} | {}\nXP D{} A{} R{} / {}",
                     g_state.mode, enabled ? "ON" : "OFF",
                     g_state.mapReady ? "READY" : "SCAN", g_state.mapProgress,
                     g_state.mapHazards, g_state.mapSafeSurfaces, g_state.mapOrbs,
@@ -1076,7 +1103,8 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
                     g_state.targetId < 0 ? "--" : std::to_string(g_state.targetId),
                     g_state.distance, etaText(g_state.framesToImpact),
                     g_state.orbTargetId < 0 ? "--" : std::string(orbName(g_state.orbTargetId)), g_state.action,
-                    g_state.experienceDeaths, g_state.experienceAttempts, g_state.experienceHint
+                    g_state.experienceDeaths, g_state.experienceAttempts,
+                    g_state.experienceStreak, g_state.experienceHint
                 );
                 m_fields->hudLabel->setString(hud.c_str());
             }
@@ -1179,7 +1207,7 @@ protected:
                 "MAP PRECHECK {} {:.1f}% | H{} B{} O{} P{} SPD{} DASH{} PAD{}\n"
                 "NEXT: {}\nMODE {} FRAME {} FPS {:.0f}\n"
                 "SCAN {} objects / {} red / {} cyan / {} orb\n"
-                "TARGET {} ETA {} ORB {} ACTION {}\nXP D{} A{} / {}",
+                "TARGET {} ETA {} ORB {} ACTION {}\nXP D{} A{} R{} / {}",
                 g_state.mapReady ? "READY" : "WAIT",
                 g_state.mapProgress, g_state.mapHazards, g_state.mapSafeSurfaces,
                 g_state.mapOrbs, g_state.mapPortals, g_state.mapSpeedPortals, g_state.mapDashRings, g_state.mapPads,
@@ -1190,7 +1218,7 @@ protected:
                 etaText(g_state.framesToImpact),
                 g_state.orbTargetId < 0 ? "--" : std::string(orbName(g_state.orbTargetId)),
                 g_state.action, g_state.experienceDeaths, g_state.experienceAttempts,
-                g_state.experienceHint
+                g_state.experienceStreak, g_state.experienceHint
             );
             m_statusLabel->setString(status.c_str());
         }

@@ -8,9 +8,9 @@
   },
   "id": "noob.geopilot",
   "name": "GeoPilot Auto Play",
-  "version": "v0.4.3",
+  "version": "v0.4.4",
   "developer": "Noob",
-  "description": "Conservative Cube spike detection, adaptive timing, death-learning, corrected UI/icon and expanded orb/dash/speed-portal scanning.",
+  "description": "Expanded spike recognition, safer retry control, persistent death-learning, fixed UI/icon, dash rings and speed portals.",
   "repository": "https://github.com/locquach700-del/script/tree/geopilot-build/GeoPilot",
   "settings": {
     "controller-title": {
