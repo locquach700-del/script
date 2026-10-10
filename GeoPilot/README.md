@@ -1,4 +1,4 @@
-# GeoPilot Auto Play v0.4.2 — Geometry Dash 2.2081 / Geode 5.10.1
+# GeoPilot Auto Play v0.4.3 — Geometry Dash 2.2081 / Geode 5.10.1
 
 ## Included
 - Bundled GeoPilot icon, shown as the single button inside Pause. Click it to open Control Center.
@@ -39,3 +39,10 @@ Local SDK commands:
 - Added the root `logo.png` used by Geode's in-game mod listing.
 
 Use Practice Mode when first testing a level. Custom hitboxes, unusual spike IDs, gravity flips, and tightly scripted orb sequences can still require manual adjustment.
+
+
+## v0.4.3 — expanded interaction catalog
+- Distinguishes jump-activated Drop/Black Orbs from contact-activated Dash Rings and Gravity Dash Rings. Dash rings are reported in the route plan but do not cause a jump press just to activate them.
+- Recognizes the five standard speed portal IDs (slow, normal, fast, faster, fastest), reports them in preflight, and keeps recomputing closing speed live after the transition.
+- Preflight now reports mode portals, speed portals, dash rings, pads, jump orbs, hazards, and safe surfaces as distinct groups.
+- This inventory focuses on objects that affect movement, collision, or input. Color/move/toggle/area triggers and arbitrary custom hitboxes can alter a scene in ways static classification cannot fully simulate.

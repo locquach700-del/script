@@ -47,6 +47,8 @@ namespace {
         int mapOrbs = 0;
         int mapPortals = 0;
         int mapPads = 0;
+        int mapSpeedPortals = 0;
+        int mapDashRings = 0;
         float mapProgress = 0.f;
         bool mapReady = false;
         std::string routeSignal = "MAP ANALYSIS";
@@ -187,10 +189,42 @@ namespace {
             case GameObjectType::GreenRing:
             case GameObjectType::RedJumpRing:
             case GameObjectType::CustomRing:
+            case GameObjectType::DropRing:
             case GameObjectType::SpiderOrb:
             case GameObjectType::TeleportOrb:
                 return true;
             default: return false;
+        }
+    }
+
+    // Dash rings activate by contact rather than a jump-button tap.
+    bool isContactActivatedRing(GameObject* object) {
+        if (!object) return false;
+        return object->m_objectType == GameObjectType::DashRing ||
+               object->m_objectType == GameObjectType::GravityDashRing ||
+               object->m_objectID == 1704 || object->m_objectID == 1751;
+    }
+
+    // Speed portals are Modifier objects rather than one of the form-portal
+    // enum values. These are the standard GD object IDs for the speed set.
+    bool isSpeedPortalObject(GameObject* object) {
+        if (!object) return false;
+        switch (object->m_objectID) {
+            case 201: case 202: case 203: case 204: case 1334:
+                return true;
+            default: return false;
+        }
+    }
+
+    std::string speedPortalName(GameObject* object) {
+        if (!object) return "SPEED CHANGE";
+        switch (object->m_objectID) {
+            case 201: return "SPEED SLOW";
+            case 202: return "SPEED NORMAL";
+            case 203: return "SPEED FAST";
+            case 204: return "SPEED FASTER";
+            case 1334: return "SPEED FASTEST";
+            default: return "SPEED CHANGE";
         }
     }
 
@@ -268,9 +302,10 @@ namespace {
         bool hazard = false;
         bool safeSurface = false;
         bool orb = false;
+        bool contactRing = false;
     };
 
-    enum class RouteKind { Hazard, SafeSurface, Orb, Portal, Pad };
+    enum class RouteKind { Hazard, SafeSurface, Orb, Portal, SpeedPortal, DashRing, Pad };
 
     struct RouteEvent {
         GameObject* object = nullptr;
@@ -291,6 +326,7 @@ namespace {
         if (id == 1594) return "TOGGLE";
         if (id == 3004) return "SPIDER";
         if (id == 3027) return "TELEPORT";
+        if (id == 1704 || id == 1751) return "DASH";
         switch (object->m_objectType) {
             case GameObjectType::YellowJumpRing: return "YELLOW";
             case GameObjectType::PinkJumpRing: return "PINK";
@@ -300,6 +336,9 @@ namespace {
             case GameObjectType::SpiderOrb: return "SPIDER";
             case GameObjectType::TeleportOrb: return "TELEPORT";
             case GameObjectType::CustomRing: return "CUSTOM";
+            case GameObjectType::DropRing: return "BLACK/DROP";
+            case GameObjectType::DashRing: return "DASH";
+            case GameObjectType::GravityDashRing: return "GRAVITY DASH";
             default: return "ORB";
         }
     }
@@ -310,6 +349,8 @@ namespace {
             case RouteKind::SafeSurface: return "LAND BLUE";
             case RouteKind::Orb: return fmt::format("TAP {}", orbName(object));
             case RouteKind::Portal: return "MODE PORTAL";
+            case RouteKind::SpeedPortal: return speedPortalName(object);
+            case RouteKind::DashRing: return "DASH / CONTACT";
             case RouteKind::Pad: return "AUTO PAD";
         }
         return "CHECK";
@@ -375,6 +416,8 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
         int mapOrbs = 0;
         int mapPortals = 0;
         int mapPads = 0;
+        int mapSpeedPortals = 0;
+        int mapDashRings = 0;
         bool mapAnalyzed = false;
         float lastTriggeredX = -100000.f;
         int lastTriggeredId = -1;
@@ -437,6 +480,8 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
         m_fields->mapOrbs = 0;
         m_fields->mapPortals = 0;
         m_fields->mapPads = 0;
+        m_fields->mapSpeedPortals = 0;
+        m_fields->mapDashRings = 0;
         const CCPoint initialPlayer = m_player1 ? nodeCenterInParent(m_player1, this) : CCPointZero;
         m_fields->mapStartX = initialPlayer.x;
         m_fields->mapEndX = initialPlayer.x;
@@ -452,9 +497,15 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
             if (isHazardObject(object)) {
                 kind = RouteKind::Hazard;
                 ++m_fields->mapHazards;
+            } else if (isContactActivatedRing(object)) {
+                kind = RouteKind::DashRing;
+                ++m_fields->mapDashRings;
             } else if (isInteractiveOrb(object)) {
                 kind = RouteKind::Orb;
                 ++m_fields->mapOrbs;
+            } else if (isSpeedPortalObject(object)) {
+                kind = RouteKind::SpeedPortal;
+                ++m_fields->mapSpeedPortals;
             } else if (isPortalObject(object)) {
                 kind = RouteKind::Portal;
                 ++m_fields->mapPortals;
@@ -482,13 +533,15 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
         g_state.mapOrbs = m_fields->mapOrbs;
         g_state.mapPortals = m_fields->mapPortals;
         g_state.mapPads = m_fields->mapPads;
+        g_state.mapSpeedPortals = m_fields->mapSpeedPortals;
+        g_state.mapDashRings = m_fields->mapDashRings;
         g_state.routeSignal = fmt::format(
-            "MAP READY H{} B{} O{} P{} PAD{}",
+            "MAP READY H{} B{} O{} P{} SPD{} DASH{} PAD{}",
             m_fields->mapHazards, m_fields->mapSafeSurfaces, m_fields->mapOrbs,
-            m_fields->mapPortals, m_fields->mapPads);
-        log::info("GeoPilot preflight: events={} hazards={} safe-surfaces={} orbs={} portals={} pads={}",
+            m_fields->mapPortals, m_fields->mapSpeedPortals, m_fields->mapDashRings, m_fields->mapPads);
+        log::info("GeoPilot preflight: events={} hazards={} safe-surfaces={} orbs={} portals={} speed-portals={} dash-rings={} pads={}",
             m_fields->routePlan.size(), m_fields->mapHazards, m_fields->mapSafeSurfaces,
-            m_fields->mapOrbs, m_fields->mapPortals, m_fields->mapPads);
+            m_fields->mapOrbs, m_fields->mapPortals, m_fields->mapSpeedPortals, m_fields->mapDashRings, m_fields->mapPads);
         return true;
     }
 
@@ -597,6 +650,7 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
             const bool hazard = isHazardObject(object);
             const bool safeSurface = isSafeSurface(object);
             const bool orb = isInteractiveOrb(object);
+            const bool contactRing = isContactActivatedRing(object);
             if (hazard) ++g_state.knownHazards;
             if (safeSurface) ++g_state.safeSurfaces;
             if (orb) ++g_state.recognizedOrbs;
@@ -609,6 +663,7 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
             target.hazard = hazard;
             target.safeSurface = safeSurface;
             target.orb = orb;
+            target.contactRing = contactRing;
             target.contactDistance = dx - approximateHalfWidth(object) - approximateHalfWidth(player);
             targets.push_back(target);
             const bool actionableHazard = mode == PilotMode::Cube
@@ -616,7 +671,7 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
                 : hazard;
             if (actionableHazard && dx > 0.f) hazards.push_back(target);
             if (safeSurface && dx > 0.f) safeSurfaces.push_back(target);
-            if (orb && dx > -8.f && std::abs(dy) <= 220.f) orbs.push_back(target);
+            if ((orb || contactRing) && dx > -8.f && std::abs(dy) <= 220.f) orbs.push_back(target);
         }
 
         std::sort(targets.begin(), targets.end(), [](ScanTarget const& a, ScanTarget const& b) {
@@ -709,10 +764,10 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
                     const auto green = cocos2d::ccColor4F{0.12f, 1.00f, 0.52f, 0.92f};
                     const auto safeCyan = cocos2d::ccColor4F{0.20f, 0.82f, 1.00f, 0.92f};
                     const auto lineColor = target.hazard ? red :
-                        (target.orb ? green : (target.safeSurface ? safeCyan : blue));
+                        ((target.orb || target.contactRing) ? green : (target.safeSurface ? safeCyan : blue));
                     draw->drawSegment(playerCenter, target.point,
                         (target.hazard || target.orb || target.safeSurface) ? 1.6f : 0.7f, lineColor);
-                    if (target.orb) {
+                    if (target.orb || target.contactRing) {
                         const float radius = 12.f;
                         const CCPoint top{target.point.x, target.point.y + radius};
                         const CCPoint right{target.point.x + radius, target.point.y};
@@ -789,7 +844,15 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
                 nearestOrb->dx > 10.f &&
                 nearestOrb->object != m_fields->lastOrbApproach;
 
-            if (inOrbContactWindow && nearestOrb->object != m_fields->lastOrbTriggered) {
+            if (isContactActivatedRing(nearestOrb->object)) {
+                if (inOrbContactWindow) {
+                    // Dash rings are contact-activated. Never pulse Jump just to activate one.
+                    g_state.action = "DASH RING / CONTACT";
+                    orbAction = true;
+                } else {
+                    g_state.action = "TRACK DASH / CONTACT";
+                }
+            } else if (inOrbContactWindow && nearestOrb->object != m_fields->lastOrbTriggered) {
                 player->pushButton(PlayerButton::Jump);
                 m_fields->releaseNextFrame = true;
                 m_fields->releaseCooldown = 0.095f;
@@ -803,9 +866,6 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
                 m_fields->lastOrbApproach = nearestOrb->object;
                 g_state.action = fmt::format("APPROACH / {}", orbName(nearestOrb->object));
                 orbAction = true;
-            } else if (nearestOrb->object->m_objectID == 1704 || nearestOrb->object->m_objectID == 1751) {
-                // Dash rings activate on contact; don't waste a jump press on them.
-                g_state.action = "DASH RING / CONTACT";
             }
         }
 
@@ -1002,14 +1062,14 @@ class $modify(GeoPilotPlayLayer, PlayLayer) {
             if (hudEnabled) {
                 const std::string hud = fmt::format(
                     "GEOPILOT {} | AUTO {} | MAP {} {:.1f}%\n"
-                    "MAP H{} B{} O{} PORT{} PAD{} | FRAME {} FPS {:.0f}\n"
+                    "MAP H{} B{} O{} PORT{} SPD{} DASH{} PAD{} | FRAME {} FPS {:.0f}\n"
                     "SCAN {} objects / {} red / {} cyan / {} orb | LEAD {}f\n"
                     "PLAN {}\n"
                     "TARGET {} DIST {:.1f} ETA {} ORB {} | {}\nXP D{} A{} / {}",
                     g_state.mode, enabled ? "ON" : "OFF",
                     g_state.mapReady ? "READY" : "SCAN", g_state.mapProgress,
                     g_state.mapHazards, g_state.mapSafeSurfaces, g_state.mapOrbs,
-                    g_state.mapPortals, g_state.mapPads, g_state.frame, g_state.fps,
+                    g_state.mapPortals, g_state.mapSpeedPortals, g_state.mapDashRings, g_state.mapPads, g_state.frame, g_state.fps,
                     g_state.scannedObjects, g_state.knownHazards, g_state.safeSurfaces,
                     g_state.recognizedOrbs, leadFrames,
                     g_state.routeSignal,
@@ -1116,13 +1176,13 @@ protected:
 
         if (m_statusLabel) {
             const std::string status = fmt::format(
-                "MAP PRECHECK {} {:.1f}% | H{} B{} O{} P{} PAD{}\n"
+                "MAP PRECHECK {} {:.1f}% | H{} B{} O{} P{} SPD{} DASH{} PAD{}\n"
                 "NEXT: {}\nMODE {} FRAME {} FPS {:.0f}\n"
                 "SCAN {} objects / {} red / {} cyan / {} orb\n"
                 "TARGET {} ETA {} ORB {} ACTION {}\nXP D{} A{} / {}",
                 g_state.mapReady ? "READY" : "WAIT",
                 g_state.mapProgress, g_state.mapHazards, g_state.mapSafeSurfaces,
-                g_state.mapOrbs, g_state.mapPortals, g_state.mapPads,
+                g_state.mapOrbs, g_state.mapPortals, g_state.mapSpeedPortals, g_state.mapDashRings, g_state.mapPads,
                 g_state.routeSignal, g_state.mode, g_state.frame, g_state.fps,
                 g_state.scannedObjects, g_state.knownHazards, g_state.safeSurfaces,
                 g_state.recognizedOrbs,
